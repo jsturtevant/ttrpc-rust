@@ -63,12 +63,12 @@ pub struct Server {
 
 struct Connection
  {
-    fd: FD,
+    fd:  FD,
     quit: Arc<AtomicBool>,
     handler: Option<JoinHandle<()>>,
 }
 
-impl Connection 
+impl Connection
  {
     fn close(&self) {
         self.quit.store(true, Ordering::SeqCst);

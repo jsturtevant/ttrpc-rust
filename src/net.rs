@@ -23,11 +23,12 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::common;
 
-
 #[derive(Clone, Copy)]
 pub(crate) struct FD {
     #[cfg(target_os = "linux")]
     pub fd: RawFd,
+    #[cfg(target_os = "windows")]
+    pub fd: BorrowedHandle,
 }
 
 pub(crate) struct LinuxListener {
