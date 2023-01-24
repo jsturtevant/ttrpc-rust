@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use nix::sys::socket::*;
-use std::os::unix::io::RawFd;
 
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
+use crate::net::{PipeConnection, LinuxConnection};
 use crate::proto::{Code, MessageHeader, MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
+use std::io::{self, Read, Write};
+use std::sync::{Arc, Mutex};
 
-fn retryable(e: nix::Error) -> bool {
-    use ::nix::Error;
-    e == Error::EINTR || e == Error::EAGAIN
-}
 
-fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
+
+fn read_count(fd: &Arc<LinuxConnection>, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];
     let mut len = 0;
 
@@ -32,7 +30,7 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
     }
 
     loop {
-        match recv(fd, &mut v[len..], MsgFlags::empty()) {
+        match  fd.read(&mut v[len..]) {
             Ok(l) => {
                 len += l;
                 // when socket peer closed, it would return 0.
@@ -40,11 +38,6 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
                     break;
                 }
             }
-
-            Err(e) if retryable(e) => {
-                // Should retry
-            }
-
             Err(e) => {
                 return Err(Error::Socket(e.to_string()));
             }
@@ -54,7 +47,7 @@ fn read_count(fd: RawFd, count: usize) -> Result<Vec<u8>> {
     Ok(v[0..len].to_vec())
 }
 
-fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
+fn write_count(fd: &Arc<LinuxConnection>, buf: &[u8], count: usize) -> Result<usize> {
     let mut len = 0;
 
     if count == 0 {
@@ -62,18 +55,13 @@ fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
     }
 
     loop {
-        match send(fd, &buf[len..], MsgFlags::empty()) {
+        match  fd.write(&buf[len..]){
             Ok(l) => {
                 len += l;
                 if len == count {
                     break;
                 }
             }
-
-            Err(e) if retryable(e) => {
-                // Should retry
-            }
-
             Err(e) => {
                 return Err(Error::Socket(e.to_string()));
             }
@@ -83,7 +71,7 @@ fn write_count(fd: RawFd, buf: &[u8], count: usize) -> Result<usize> {
     Ok(len)
 }
 
-fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
+fn read_message_header(fd: &Arc<LinuxConnection>) -> Result<MessageHeader> {
     let buf = read_count(fd, MESSAGE_HEADER_LENGTH)?;
     let size = buf.len();
     if size != MESSAGE_HEADER_LENGTH {
@@ -98,7 +86,7 @@ fn read_message_header(fd: RawFd) -> Result<MessageHeader> {
     Ok(mh)
 }
 
-pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
+pub fn read_message(fd: &Arc<LinuxConnection>) -> Result<(MessageHeader, Vec<u8>)> {
     let mh = read_message_header(fd)?;
     trace!("Got Message header {:?}", mh);
 
@@ -125,7 +113,7 @@ pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
     Ok((mh, buf))
 }
 
-fn write_message_header(fd: RawFd, mh: MessageHeader) -> Result<()> {
+fn write_message_header(fd: &Arc<LinuxConnection>, mh: MessageHeader) -> Result<()> {
     let buf: Vec<u8> = mh.into();
 
     let size = write_count(fd, &buf, MESSAGE_HEADER_LENGTH)?;
@@ -139,7 +127,7 @@ fn write_message_header(fd: RawFd, mh: MessageHeader) -> Result<()> {
     Ok(())
 }
 
-pub fn write_message(fd: RawFd, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
+pub fn write_message(fd: &Arc<LinuxConnection>, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
     write_message_header(fd, mh)?;
 
     let size = write_count(fd, &buf, buf.len())?;
