@@ -81,8 +81,8 @@ impl Client {
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
-                let c = Arc::new( LinuxConnection::new(fd));
-                if let Err(e) = write_message(&c, mh, buf) {
+
+                if let Err(e) = write_message(fd, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = recver_map.lock().unwrap();
@@ -143,8 +143,8 @@ impl Client {
 
                 let mh;
                 let buf;
-                let c = Arc::new(LinuxConnection::new(fd));
-                match read_message(&c) {
+
+                match read_message(fd) {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;

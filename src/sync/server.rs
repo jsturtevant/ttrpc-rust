@@ -28,12 +28,14 @@ use std::{thread};
 use super::utils::response_to_channel;
 #[cfg(not(target_os = "linux"))]
 use crate::common::set_fd_close_exec;
-use crate::context;
+use crate::{context, common};
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::{MethodHandler, TtrpcContext};
-use crate::net::{LinuxListener, Listener, PipeConnection, LinuxConnection};
+use crate::net::{LinuxListener, FD};
+
+
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -47,10 +49,10 @@ type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 
 /// A ttrpc Server (sync).
 pub struct Server {
-    listeners: Vec<RawFd>,
-    monitor_fd: (RawFd, RawFd),
+    listeners: Vec<FD>,
+    monitor_fd: FD,
     listener_quit_flag: Arc<AtomicBool>,
-    connections: Arc<Mutex<HashMap<RawFd, Connection>>>,
+    connections: Arc<Mutex<HashMap<i32, Connection>>>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
     handler: Option<JoinHandle<()>>,
     reaper: Option<(Sender<i32>, JoinHandle<()>)>,
@@ -61,7 +63,7 @@ pub struct Server {
 
 struct Connection
  {
-    fd: Arc<LinuxConnection>,
+    fd: FD,
     quit: Arc<AtomicBool>,
     handler: Option<JoinHandle<()>>,
 }
@@ -78,7 +80,7 @@ impl Connection
 
 struct ThreadS<'a> 
 {
-    fd:  &'a Arc<LinuxConnection>,
+    fd:  FD,
     fdlock: &'a Arc<Mutex<()>>,
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
@@ -92,7 +94,7 @@ struct ThreadS<'a>
 
 #[allow(clippy::too_many_arguments)]
 fn start_method_handler_thread(
-    fd: Arc<LinuxConnection>,
+    fd: FD,
     fdlock: Arc<Mutex<()>>,
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
@@ -120,7 +122,7 @@ fn start_method_handler_thread(
                         .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
-                result = read_message(&fd);
+                result = read_message(fd.fd);
             }
 
             if quit.load(Ordering::SeqCst) {
@@ -211,7 +213,7 @@ fn start_method_handler_thread(
                 continue;
             };
             let ctx = TtrpcContext {
-                fd: fd.id(),
+                fd: fd.fd,
                 mh,
                 res_tx: res_tx.clone(),
                 metadata: context::from_pb(&req.metadata),
@@ -239,7 +241,7 @@ fn start_method_handler_threads(num: usize, ts: &ThreadS)
             break;
         }
         start_method_handler_thread(
-            ts.fd.clone(),
+            ts.fd,
             ts.fdlock.clone(),
             ts.wtc.clone(),
             ts.quit.clone(),
@@ -264,7 +266,7 @@ impl Default for Server {
     fn default() -> Self {
         Server {
             listeners: Vec::with_capacity(1),
-            monitor_fd: (-1, -1),
+            monitor_fd: FD{ fd:-1},
             listener_quit_flag: Arc::new(AtomicBool::new(false)),
             connections: Arc::new(Mutex::new(HashMap::new())),
             methods: Arc::new(HashMap::new()),
@@ -289,9 +291,10 @@ impl Server {
             ));
         }
 
-        let listener = LinuxListener::new(sockaddr)?;
+        let (fd, _) = common::do_bind(sockaddr)?;
+        common::do_listen(fd)?;
 
-        self.listeners.push(listener.as_raw_fd());
+        self.listeners.push(FD { fd: fd });
         Ok(self)
     }
 
@@ -300,11 +303,8 @@ impl Server {
             return Err(Error::Others(
                 "ttrpc-rust just support 1 sockaddr now".to_string(),
             ));
-        }
-
-        let listener = LinuxListener::new_from_fd(fd)?;
-        
-        self.listeners.push(listener.as_raw_fd());
+        }        
+        self.listeners.push(FD { fd: fd });
 
         Ok(self)
     }
@@ -388,10 +388,11 @@ impl Server {
             .name("listener_loop".into())
             .spawn(move || {
                 
-                let mut listener = LinuxListener::new_from_fd(listenerFD).unwrap();
+                let mut listener = LinuxListener::new_from_fd(listenerFD.fd).unwrap();
+                //self.monitor_fd = listener.monitor_fd.1;
 
                 loop {   
-                    let pipeConnection = match listener.accept(&listener_quit_flag) {
+                    let pipeFd = match listener.accept(&listener_quit_flag) {
                         Ok(None) => {
                             continue;
                         }
@@ -403,16 +404,11 @@ impl Server {
                             break;
                         }
                     };
-                   
 
                     let methods = methods.clone();
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
                     let reaper_tx_child = reaper_tx.clone();
-                    let pipeArc = Arc::new(pipeConnection);
-                    let pipeChild = pipeArc.clone();
-
-
 
                     let handler = thread::Builder::new()
                         .name("client_handler".into())
@@ -420,12 +416,11 @@ impl Server {
                             debug!("Got new client");
                             // Start response thread
                             let quit_res = child_quit.clone();
-                            let pipe = pipeChild.clone();
                             let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = thread::spawn(move || {
                                 for r in res_rx.iter() {
                                     trace!("response thread get {:?}", r);
-                                    if let Err(e) = write_message(&pipe, r.0, r.1) {
+                                    if let Err(e) = write_message(pipeFd.fd, r.0, r.1) {
                                         error!("write_message got {:?}", e);
                                         quit_res.store(true, Ordering::SeqCst);
                                         break;
@@ -435,11 +430,10 @@ impl Server {
                                 trace!("response thread quit");
                             });
 
-                            let pipe = pipeChild.clone();
                             let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) =
                                 sync_channel(0);
                             let ts = ThreadS {
-                                fd: &pipe,
+                                fd: pipeFd,
                                 fdlock: &Arc::new(Mutex::new(())),
                                 wtc: &Arc::new(AtomicUsize::new(0)),
                                 methods: &methods,
@@ -466,7 +460,7 @@ impl Server {
                             handler.join().unwrap_or(());
                             // client_handler should not close fd before exit
                             // , which prevent fd reuse issue.
-                            reaper_tx_child.send(pipe.id()).unwrap();
+                            reaper_tx_child.send(listenerFD.fd).unwrap();
 
                             debug!("client thread quit");
                         })
@@ -474,11 +468,10 @@ impl Server {
 
                     let mut cns = connections.lock().unwrap();
 
-                    let c = pipeArc.clone();
                     cns.insert(
-                        c.id(),
+                        listenerFD.fd,
                         Connection {
-                            fd: c,
+                            fd: listenerFD,
                             handler: Some(handler),
                             quit: quit.clone(),
                         },
@@ -516,7 +509,12 @@ impl Server {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
 
         //TODO
-        //self.listeners[0].close().unwrap();
+        close(self.monitor_fd.fd).unwrap_or_else(|e| {
+            warn!(
+                "failed to close notify fd: {} with error: {}",
+                self.monitor_fd.fd, e
+            )
+        });
        
         info!("close monitor");
         if let Some(handler) = self.handler.take() {
@@ -558,6 +556,6 @@ impl FromRawFd for Server {
 
 impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
-        self.listeners[0].as_raw_fd()
+        self.listeners[0].fd
     }
 }

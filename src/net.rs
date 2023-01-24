@@ -21,28 +21,18 @@ use nix::sys::socket::{self, *};
 use nix::unistd::*;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-
-
 use crate::common;
 
-pub(crate) trait Listener: Close {
-    type Type: PipeConnection;
-    fn accept(&mut self, quitFlag: &Arc<AtomicBool>) -> std::result::Result<Option<Self::Type>, io::Error>;
-}
 
-pub(crate) trait Close {
-    fn close(&self) -> Result<()>;
+#[derive(Clone, Copy)]
+pub(crate) struct FD {
+    #[cfg(target_os = "linux")]
+    pub fd: RawFd,
 }
-
-pub(crate) trait PipeConnection: Close + Read + Write +Send + Sync + Sync {
-    fn id(&self) -> i32;
-}
-
 
 pub(crate) struct LinuxListener {
     fd: RawFd,
-    monitor_fd: (RawFd, RawFd),
+    pub(crate) monitor_fd: (RawFd, RawFd),
 }
 
 impl AsRawFd for LinuxListener {
@@ -52,18 +42,6 @@ impl AsRawFd for LinuxListener {
 }
 
 impl LinuxListener {
-    pub(crate) fn new(sockaddr: &str) -> Result<LinuxListener> {
-        let (fd, _) = common::do_bind(sockaddr)?;
-        common::do_listen(fd)?;
-
-        let fds = LinuxListener::new_monitor_fd()?;
-
-        Ok(LinuxListener {
-            fd,
-            monitor_fd: fds,
-        })
-    }
-
     pub(crate) fn new_from_fd(fd: RawFd) -> Result<LinuxListener> {
         let fds = LinuxListener::new_monitor_fd()?;
 
@@ -89,12 +67,8 @@ impl LinuxListener {
 
         Ok(fds)
     }
-}
 
-impl Listener for LinuxListener {
-    type Type = LinuxConnection;
-
-    fn accept(&mut self, quitFlag: &Arc<AtomicBool>) ->  std::result::Result<Option<Self::Type>, io::Error> {
+    pub(crate) fn accept(&mut self, quitFlag: &Arc<AtomicBool>) ->  std::result::Result<Option<FD>, io::Error> {
         if quitFlag.load(Ordering::SeqCst) {
             info!("listener shutdown for quit flag");
             return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
@@ -171,19 +145,7 @@ impl Listener for LinuxListener {
         };
 
 
-        Ok(Some(LinuxConnection { fd }))
-    }
-}
-
-impl Close for LinuxListener {
-    fn close(&self) -> Result<()> {
-        close(self.monitor_fd.1).unwrap_or_else(|e| {
-            warn!(
-                "failed to close notify fd: {} with error: {}",
-                self.monitor_fd.1, e
-            )
-        });
-        Ok(())
+        Ok(Some( FD { fd } ))
     }
 
 }
@@ -197,22 +159,23 @@ impl LinuxConnection {
     pub(crate) fn new(fd: RawFd) -> LinuxConnection {
         LinuxConnection { fd }
     }
-}
 
-impl PipeConnection for LinuxConnection {
-    fn id(&self) -> i32 {
-        self.fd as i32
+    pub(crate) fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        loop {
+            match send(self.fd, &buf, MsgFlags::empty()) {
+                Ok(l) => return Ok(l),
+                Err(e) if retryable(e) => {
+                    // Should retry
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            }
+        }
     }
-}
 
-impl Close for LinuxConnection {
-    fn close(&self) -> Result<()> {
-        unimplemented!()
-    }
-}
-
-impl Read for LinuxConnection {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    pub(crate) fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         loop {
             match  recv(self.fd, buf, MsgFlags::empty()) {
                 Ok(l) => return Ok(l),
@@ -230,29 +193,8 @@ impl Read for LinuxConnection {
     }
 }
 
+
 fn retryable(e: nix::Error) -> bool {
     use ::nix::Error;
     e == Error::EINTR || e == Error::EAGAIN
-}
-
-impl Write for LinuxConnection {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        loop {
-            match send(self.fd, &buf, MsgFlags::empty()) {
-                Ok(l) => return Ok(l),
-                Err(e) if retryable(e) => {
-                    // Should retry
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            }
-        }
-        
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
 }
