@@ -14,40 +14,74 @@
 
 use crate::error::Result;
 use nix::sys::socket::*;
-use std::io::{self, Read, Write};
+use std::io::{self};
 use std::os::unix::io::RawFd;
 use std::os::unix::prelude::AsRawFd;
-use nix::sys::socket::{self, *};
+use nix::sys::socket::{self};
 use nix::unistd::*;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use crate::common;
+use std::sync::{Arc};
+use std::sync::atomic::{AtomicBool,  Ordering};
+
+use crate::sync::channel::{read_message, write_message};
+use crate::proto::{MessageHeader};
+
 
 #[derive(Clone, Copy)]
-pub(crate) struct FD {
+pub struct FD {
     #[cfg(target_os = "linux")]
-    pub fd: RawFd,
-    #[cfg(target_os = "windows")]
-    pub fd: BorrowedHandle,
-}
-
-pub(crate) struct LinuxListener {
     fd: RawFd,
-    pub(crate) monitor_fd: (RawFd, RawFd),
+    #[cfg(target_os = "windows")]
+    pub fd: RawHandle,
 }
 
-impl AsRawFd for LinuxListener {
+impl FD {
+    pub fn new(fd: RawFd) -> FD {
+        FD { fd }
+    }
+
+    pub fn id(&self) -> i32 {
+        self.fd
+    }
+
+    pub fn write(&self, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
+        let mut fd = Connection::new(self.fd);
+        return write_message(&mut fd, mh, buf);
+    }
+
+    pub fn read(&self) -> Result<(MessageHeader, Vec<u8>)> {
+        let mut fd = Connection::new(self.fd);
+        return read_message(&mut fd)
+    }
+
+    pub fn close(&self) -> Result<()> {
+        match close(self.fd) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn shutdown(&self) {
+        socket::shutdown(self.fd, Shutdown::Read).unwrap_or(());
+    }
+}
+
+pub struct Listener {
+    fd: RawFd,
+    pub monitor_fd: (RawFd, RawFd),
+}
+
+impl AsRawFd for Listener {
     fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }
 
-impl LinuxListener {
-    pub(crate) fn new_from_fd(fd: RawFd) -> Result<LinuxListener> {
-        let fds = LinuxListener::new_monitor_fd()?;
+impl Listener {
+    pub(crate) fn new_from_fd(fd: FD) -> Result<Listener> {
+        let fds = Listener::new_monitor_fd()?;
 
-        Ok(LinuxListener {
-            fd,
+        Ok(Listener {
+            fd: fd.fd,
             monitor_fd: fds,
         })
     }
@@ -152,13 +186,13 @@ impl LinuxListener {
 }
 
 
-pub(crate) struct LinuxConnection {
+pub struct Connection {
     fd: RawFd,
 }
 
-impl LinuxConnection {
-    pub(crate) fn new(fd: RawFd) -> LinuxConnection {
-        LinuxConnection { fd }
+impl Connection {
+    pub fn new(fd: RawFd) -> Connection {
+        Connection { fd }
     }
 
     pub(crate) fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

@@ -14,15 +14,10 @@
 
 
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
-use crate::net::{ LinuxConnection};
+use crate::sync::sys::{Connection};
 use crate::proto::{Code, MessageHeader, MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
-use std::io::{self, Read, Write};
-use std::os::unix::prelude::RawFd;
-use std::sync::{Arc, Mutex};
 
-
-
-fn read_count(fd: &mut LinuxConnection, count: usize) -> Result<Vec<u8>> {
+fn read_count(fd: &mut Connection, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];
     let mut len = 0;
 
@@ -48,7 +43,7 @@ fn read_count(fd: &mut LinuxConnection, count: usize) -> Result<Vec<u8>> {
     Ok(v[0..len].to_vec())
 }
 
-fn write_count(fd: &mut LinuxConnection, buf: &[u8], count: usize) -> Result<usize> {
+fn write_count(fd: &mut Connection, buf: &[u8], count: usize) -> Result<usize> {
     let mut len = 0;
 
     if count == 0 {
@@ -72,7 +67,7 @@ fn write_count(fd: &mut LinuxConnection, buf: &[u8], count: usize) -> Result<usi
     Ok(len)
 }
 
-fn read_message_header(fd: &mut LinuxConnection) -> Result<MessageHeader> {
+fn read_message_header(fd: &mut Connection) -> Result<MessageHeader> {
     let buf = read_count(fd, MESSAGE_HEADER_LENGTH)?;
     let size = buf.len();
     if size != MESSAGE_HEADER_LENGTH {
@@ -87,9 +82,9 @@ fn read_message_header(fd: &mut LinuxConnection) -> Result<MessageHeader> {
     Ok(mh)
 }
 
-pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
-    let mut fd = LinuxConnection::new(fd);
-    let mh = read_message_header(&mut fd)?;
+pub fn read_message(fd: &mut Connection) -> Result<(MessageHeader, Vec<u8>)> {
+
+    let mh = read_message_header(fd)?;
     trace!("Got Message header {:?}", mh);
 
     if mh.length > MESSAGE_LENGTH_MAX as u32 {
@@ -102,7 +97,7 @@ pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
         ));
     }
 
-    let buf = read_count(&mut fd, mh.length as usize)?;
+    let buf = read_count(fd, mh.length as usize)?;
     let size = buf.len();
     if size != mh.length as usize {
         return Err(sock_error_msg(
@@ -115,7 +110,7 @@ pub fn read_message(fd: RawFd) -> Result<(MessageHeader, Vec<u8>)> {
     Ok((mh, buf))
 }
 
-fn write_message_header(fd: &mut LinuxConnection, mh: MessageHeader) -> Result<()> {
+fn write_message_header(fd: &mut Connection, mh: MessageHeader) -> Result<()> {
     let buf: Vec<u8> = mh.into();
 
     let size = write_count(fd, &buf, MESSAGE_HEADER_LENGTH)?;
@@ -129,11 +124,10 @@ fn write_message_header(fd: &mut LinuxConnection, mh: MessageHeader) -> Result<(
     Ok(())
 }
 
-pub fn write_message(fd: RawFd, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
-    let mut fd = LinuxConnection::new(fd);
-    write_message_header(&mut fd, mh)?;
+pub fn write_message(fd: &mut Connection, mh: MessageHeader, buf: Vec<u8>) -> Result<()> {
+    write_message_header(fd, mh)?;
 
-    let size = write_count(&mut fd, &buf, buf.len())?;
+    let size = write_count(fd, &buf, buf.len())?;
     if size != buf.len() {
         return Err(sock_error_msg(
             size,

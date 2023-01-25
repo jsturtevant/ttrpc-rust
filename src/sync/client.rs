@@ -15,20 +15,19 @@
 //! Sync client of ttrpc.
 
 use nix::sys::socket::*;
-use nix::unistd::close;
-use std::collections::HashMap;
 use std::os::unix::io::RawFd;
+#[cfg(target_os = "macos")]
+use crate::common::set_fd_close_exec;
+use crate::common::{client_connect, SOCK_CLOEXEC};
+
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
-#[cfg(target_os = "macos")]
-use crate::common::set_fd_close_exec;
-use crate::common::{client_connect, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
-use crate::net::LinuxConnection;
+use crate::sync::sys::FD;
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
-use crate::sync::channel::{read_message, write_message};
 use std::time::Duration;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
@@ -63,7 +62,9 @@ impl Client {
             set_fd_close_exec(close_fd).unwrap();
         }
 
-        let client_close = Arc::new(ClientClose { fd, close_fd });
+        let client_close = Arc::new(ClientClose { 
+            fd: FD::new(fd), 
+            close_fd: FD::new(close_fd) });
 
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
@@ -81,8 +82,9 @@ impl Client {
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
-
-                if let Err(e) = write_message(fd, mh, buf) {
+                
+                let fd = FD::new(fd);
+                if let Err(e) = fd.write(mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = recver_map.lock().unwrap();
@@ -144,7 +146,8 @@ impl Client {
                 let mh;
                 let buf;
 
-                match read_message(fd) {
+                let fd = FD::new(fd);
+                match fd.read() {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;
@@ -194,7 +197,8 @@ impl Client {
                 map.remove(&mh.stream_id);
             }
 
-            let _ = close(recver_fd).map_err(|e| {
+            
+            let _ = FD::new(fd).close().map_err(|e| {
                 warn!(
                     "failed to close recver_fd: {} with error: {:?}",
                     recver_fd, e
@@ -244,14 +248,15 @@ impl Client {
 }
 
 struct ClientClose {
-    fd: RawFd,
-    close_fd: RawFd,
+    fd: FD,
+    close_fd: FD,
 }
 
 impl Drop for ClientClose {
     fn drop(&mut self) {
-        close(self.close_fd).unwrap();
-        close(self.fd).unwrap();
+        self.close_fd.close().unwrap();
+        
+        self.fd.close().unwrap();
         trace!("All client is droped");
     }
 }
