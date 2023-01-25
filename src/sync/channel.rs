@@ -16,8 +16,8 @@
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
 use crate::net::{ PipeConnection};
 use crate::proto::{Code, MessageHeader, MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
-use std::io::{self, Read, Write};
-use std::sync::{Arc, Mutex};
+use std::io::{Read, Write};
+use std::sync::{Arc};
 
 
 

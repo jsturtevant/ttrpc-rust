@@ -14,13 +14,13 @@
 
 use crate::error::Result;
 use nix::sys::socket::*;
-use std::io::{self, Read, Write};
+use std::io::{self};
 use std::os::unix::io::RawFd;
 use std::os::unix::prelude::AsRawFd;
-use nix::sys::socket::{self, *};
+
 use nix::unistd::*;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc};
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::common;
 
 
@@ -198,7 +198,7 @@ impl PipeConnection {
 
     pub fn write(&self, buf: &[u8]) -> Result<usize> {
         loop {
-            match send(self.fd, &buf, MsgFlags::empty()) {
+            match send(self.fd, buf, MsgFlags::empty()) {
                 Ok(l) => return Ok(l),
                 Err(e) if retryable(e) => {
                     // Should retry
