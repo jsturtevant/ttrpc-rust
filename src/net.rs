@@ -22,6 +22,9 @@ use nix::unistd::*;
 use std::sync::{Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::common;
+#[cfg(not(target_os = "linux"))]
+use crate::common::set_fd_close_exec;
+use nix::sys::socket::{self};
 
 
 pub(crate) struct PipeListener {
@@ -74,7 +77,7 @@ impl PipeListener {
         Ok(fds)
     }
 
-    pub(crate) fn accept(&mut self, quitFlag: &Arc<AtomicBool>) ->  std::result::Result<Option<PipeConnection>, io::Error> {
+    pub(crate) fn accept( &self, quitFlag: &Arc<AtomicBool>) ->  std::result::Result<Option<PipeConnection>, io::Error> {
         if quitFlag.load(Ordering::SeqCst) {
             info!("listener shutdown for quit flag");
             return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
@@ -154,7 +157,7 @@ impl PipeListener {
         Ok(Some(PipeConnection { fd }))
     }
 
-    fn close(&self) -> Result<()> {
+    pub fn close(&self) -> Result<()> {
         close(self.monitor_fd.1).unwrap_or_else(|e| {
             warn!(
                 "failed to close notify fd: {} with error: {}",
@@ -190,7 +193,7 @@ impl PipeConnection {
                     continue;
                 }
                 Err(e) => {
-                    return Err(e.into());
+                    return Err(crate::Error::Nix(e));
                 }
             }
         }
@@ -205,15 +208,25 @@ impl PipeConnection {
                     continue;
                 }
                 Err(e) => {
-                    return Err(e.into());
+                    return Err(crate::Error::Nix(e));
                 }
             }
         }
         
     }
 
-    fn close(&self) -> Result<()> {
-        unimplemented!()
+    pub fn close(&self) -> Result<()> {
+        match close(self.fd) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(crate::Error::Nix(e))
+        }
+    }
+
+    pub fn shutdown(&self) -> Result<()> {
+        match socket::shutdown(self.fd, Shutdown::Read) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(crate::Error::Nix(e))
+        }
     }
 }
 

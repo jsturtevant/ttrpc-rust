@@ -13,12 +13,13 @@
 // limitations under the License.
 
 //! Sync server of ttrpc.
+//! 
 
+#[cfg(target_os = "linux")]
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
-use nix::unistd::*;
 use protobuf::{CodedInputStream, Message};
 use std::collections::HashMap;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -26,8 +27,6 @@ use std::thread::JoinHandle;
 use std::{thread};
 
 use super::utils::response_to_channel;
-#[cfg(not(target_os = "linux"))]
-use crate::common::set_fd_close_exec;
 use crate::context;
 use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
@@ -47,10 +46,9 @@ type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 
 /// A ttrpc Server (sync).
 pub struct Server {
-    listeners: Vec<RawFd>,
-    monitor_fd: (RawFd, RawFd),
+    listeners: Vec<Arc<PipeListener>>,
     listener_quit_flag: Arc<AtomicBool>,
-    connections: Arc<Mutex<HashMap<RawFd, Connection>>>,
+    connections: Arc<Mutex<HashMap<i32, Connection>>>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
     handler: Option<JoinHandle<()>>,
     reaper: Option<(Sender<i32>, JoinHandle<()>)>,
@@ -68,11 +66,15 @@ struct Connection
 
 impl Connection 
  {
-    fn close(&self) {
+    fn close (&self) {
+        self.fd.close().unwrap_or(());
+    }
+
+    fn shutdown(&self) {
         self.quit.store(true, Ordering::SeqCst);
-        // TOODO
+
         // in case the connection had closed
-        //socket::shutdown(self.fd, Shutdown::Read).unwrap_or(());
+        self.fd.shutdown().unwrap_or(());
     }
 }
 
@@ -264,7 +266,6 @@ impl Default for Server {
     fn default() -> Self {
         Server {
             listeners: Vec::with_capacity(1),
-            monitor_fd: (-1, -1),
             listener_quit_flag: Arc::new(AtomicBool::new(false)),
             connections: Arc::new(Mutex::new(HashMap::new())),
             methods: Arc::new(HashMap::new()),
@@ -291,7 +292,7 @@ impl Server {
 
         let listener = PipeListener::new(sockaddr)?;
 
-        self.listeners.push(listener.as_raw_fd());
+        self.listeners.push(Arc::new(listener));
         Ok(self)
     }
 
@@ -304,7 +305,7 @@ impl Server {
 
         let listener = PipeListener::new_from_fd(fd)?;
         
-        self.listeners.push(listener.as_raw_fd());
+        self.listeners.push(Arc::new(listener));
 
         Ok(self)
     }
@@ -344,8 +345,7 @@ impl Server {
 
        
 
-        let listenerFD = self.listeners[0];
-
+        let listener = self.listeners[0].clone();
         let methods = self.methods.clone();
         let default = self.thread_count_default;
         let min = self.thread_count_min;
@@ -367,7 +367,7 @@ impl Server {
                                 .map(|mut cn| {
                                     cn.handler.take().map(|handler| {
                                         handler.join().unwrap();
-                                        close(fd).unwrap();
+                                        cn.close()
                                     })
                                 });
                         }
@@ -388,15 +388,15 @@ impl Server {
             .name("listener_loop".into())
             .spawn(move || {
                 
-                let mut listener = PipeListener::new_from_fd(listenerFD).unwrap();
+                let listener = listener;
 
                 loop {   
-                    let pipeConnection = match listener.accept(&listener_quit_flag) {
+                    let pipe_connection = match listener.accept(&listener_quit_flag) {
                         Ok(None) => {
                             continue;
                         }
                         Ok(Some(conn)) => {
-                                conn
+                           Arc::new(conn)
                         }
                         Err(e) => {
                             error!("listener accept got {:?}", e);
@@ -409,8 +409,7 @@ impl Server {
                     let quit = Arc::new(AtomicBool::new(false));
                     let child_quit = quit.clone();
                     let reaper_tx_child = reaper_tx.clone();
-                    let pipeArc = Arc::new(pipeConnection);
-                    let pipeChild = pipeArc.clone();
+                    let pipe_connection_child = pipe_connection.clone();
 
                     let handler = thread::Builder::new()
                         .name("client_handler".into())
@@ -418,7 +417,7 @@ impl Server {
                             debug!("Got new client");
                             // Start response thread
                             let quit_res = child_quit.clone();
-                            let pipe = pipeChild.clone();
+                            let pipe = pipe_connection_child.clone();
                             let (res_tx, res_rx): (MessageSender, MessageReceiver) = channel();
                             let handler = thread::spawn(move || {
                                 for r in res_rx.iter() {
@@ -433,7 +432,7 @@ impl Server {
                                 trace!("response thread quit");
                             });
 
-                            let pipe = pipeChild.clone();
+                            let pipe = pipe_connection_child.clone();
                             let (control_tx, control_rx): (SyncSender<()>, Receiver<()>) =
                                 sync_channel(0);
                             let ts = ThreadS {
@@ -472,11 +471,10 @@ impl Server {
 
                     let mut cns = connections.lock().unwrap();
 
-                    let c = pipeArc.clone();
                     cns.insert(
-                        c.id(),
+                        pipe_connection.id(),
                         Connection {
-                            fd: c,
+                            fd: pipe_connection,
                             handler: Some(handler),
                             quit: quit.clone(),
                         },
@@ -513,8 +511,7 @@ impl Server {
     pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
 
-        //TODO
-        //self.listeners[0].close().unwrap();
+        self.listeners[0].close().unwrap();
        
         info!("close monitor");
         if let Some(handler) = self.handler.take() {
@@ -529,7 +526,7 @@ impl Server {
         let connections = self.connections.lock().unwrap();
 
         for (_fd, c) in connections.iter() {
-            c.close();
+            c.shutdown();
         }
         // release connections's lock, since the following handler.join()
         // would wait on the other thread's exit in which would take the lock.
@@ -548,12 +545,14 @@ impl Server {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl FromRawFd for Server {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         Self::default().add_listener(fd).unwrap()
     }
 }
 
+#[cfg(target_os = "linux")]
 impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
         self.listeners[0].as_raw_fd()
