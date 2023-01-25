@@ -14,12 +14,9 @@
 
 
 use crate::error::{get_rpc_status, sock_error_msg, Error, Result};
-use crate::net::{ PipeConnection};
+use crate::sync::sys::{PipeConnection};
 use crate::proto::{Code, MessageHeader, MESSAGE_HEADER_LENGTH, MESSAGE_LENGTH_MAX};
-use std::io::{Read, Write};
 use std::sync::{Arc};
-
-
 
 fn read_count(fd: &Arc<PipeConnection>, count: usize) -> Result<Vec<u8>> {
     let mut v: Vec<u8> = vec![0; count];

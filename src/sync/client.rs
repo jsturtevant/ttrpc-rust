@@ -26,7 +26,7 @@ use std::{io, thread};
 use crate::common::set_fd_close_exec;
 use crate::common::{client_connect, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
-use crate::net::PipeConnection;
+use crate::sync::sys::{PipeConnection};
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
 use std::time::Duration;

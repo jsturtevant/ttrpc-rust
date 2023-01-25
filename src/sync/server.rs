@@ -32,7 +32,7 @@ use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::{MethodHandler, TtrpcContext};
-use crate::net::{PipeListener, PipeConnection};
+use crate::sync::sys::{PipeListener, PipeConnection};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.

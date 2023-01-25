@@ -27,7 +27,7 @@ use crate::common::set_fd_close_exec;
 use nix::sys::socket::{self};
 
 
-pub(crate) struct PipeListener {
+pub struct PipeListener {
     fd: RawFd,
     monitor_fd: (RawFd, RawFd),
 }
@@ -77,8 +77,8 @@ impl PipeListener {
         Ok(fds)
     }
 
-    pub(crate) fn accept( &self, quitFlag: &Arc<AtomicBool>) ->  std::result::Result<Option<PipeConnection>, io::Error> {
-        if quitFlag.load(Ordering::SeqCst) {
+    pub(crate) fn accept( &self, quit_flag: &Arc<AtomicBool>) ->  std::result::Result<Option<PipeConnection>, io::Error> {
+        if quit_flag.load(Ordering::SeqCst) {
             info!("listener shutdown for quit flag");
             return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
         }
@@ -121,7 +121,7 @@ impl PipeListener {
             return Ok(None);
         }
 
-        if quitFlag.load(Ordering::SeqCst) {
+        if quit_flag.load(Ordering::SeqCst) {
             info!("listener shutdown for quit flag");
             return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
         }
