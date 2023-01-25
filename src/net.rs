@@ -35,8 +35,11 @@ pub(crate) trait Close {
     fn close(&self) -> Result<()>;
 }
 
-pub(crate) trait PipeConnection: Close + Read + Write +Send + Sync + Sync {
+pub(crate) trait PipeConnection: Close + Send + Sync  {
     fn id(&self) -> i32;
+
+    fn read(&self, buf: &mut [u8]) -> Result<usize>;
+    fn write(&self, buf: &[u8]) -> Result<usize>;
 }
 
 
@@ -189,7 +192,7 @@ impl Close for LinuxListener {
 }
 
 
-pub(crate) struct LinuxConnection {
+pub struct LinuxConnection {
     fd: RawFd,
 }
 
@@ -203,16 +206,8 @@ impl PipeConnection for LinuxConnection {
     fn id(&self) -> i32 {
         self.fd as i32
     }
-}
 
-impl Close for LinuxConnection {
-    fn close(&self) -> Result<()> {
-        unimplemented!()
-    }
-}
-
-impl Read for LinuxConnection {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn read(&self, buf: &mut [u8]) -> Result<usize> {
         loop {
             match  recv(self.fd, buf, MsgFlags::empty()) {
                 Ok(l) => return Ok(l),
@@ -225,18 +220,9 @@ impl Read for LinuxConnection {
                 }
             }
         }
-        
-       
     }
-}
 
-fn retryable(e: nix::Error) -> bool {
-    use ::nix::Error;
-    e == Error::EINTR || e == Error::EAGAIN
-}
-
-impl Write for LinuxConnection {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    fn write(&self, buf: &[u8]) -> Result<usize> {
         loop {
             match send(self.fd, &buf, MsgFlags::empty()) {
                 Ok(l) => return Ok(l),
@@ -251,8 +237,15 @@ impl Write for LinuxConnection {
         }
         
     }
+}
 
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+impl Close for LinuxConnection {
+    fn close(&self) -> Result<()> {
+        unimplemented!()
     }
+}
+
+fn retryable(e: nix::Error) -> bool {
+    use ::nix::Error;
+    e == Error::EINTR || e == Error::EAGAIN
 }
