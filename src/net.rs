@@ -21,56 +21,37 @@ use nix::sys::socket::{self, *};
 use nix::unistd::*;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-
-
 use crate::common;
 
-pub(crate) trait Listener: Close {
-    type Type: PipeConnection;
-    fn accept(&mut self, quitFlag: &Arc<AtomicBool>) -> std::result::Result<Option<Self::Type>, io::Error>;
-}
 
-pub(crate) trait Close {
-    fn close(&self) -> Result<()>;
-}
-
-pub(crate) trait PipeConnection: Close + Send + Sync  {
-    fn id(&self) -> i32;
-
-    fn read(&self, buf: &mut [u8]) -> Result<usize>;
-    fn write(&self, buf: &[u8]) -> Result<usize>;
-}
-
-
-pub(crate) struct LinuxListener {
+pub(crate) struct PipeListener {
     fd: RawFd,
     monitor_fd: (RawFd, RawFd),
 }
 
-impl AsRawFd for LinuxListener {
+impl AsRawFd for PipeListener {
     fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }
 
-impl LinuxListener {
-    pub(crate) fn new(sockaddr: &str) -> Result<LinuxListener> {
+impl PipeListener {
+    pub(crate) fn new(sockaddr: &str) -> Result<PipeListener> {
         let (fd, _) = common::do_bind(sockaddr)?;
         common::do_listen(fd)?;
 
-        let fds = LinuxListener::new_monitor_fd()?;
+        let fds = PipeListener::new_monitor_fd()?;
 
-        Ok(LinuxListener {
+        Ok(PipeListener {
             fd,
             monitor_fd: fds,
         })
     }
 
-    pub(crate) fn new_from_fd(fd: RawFd) -> Result<LinuxListener> {
-        let fds = LinuxListener::new_monitor_fd()?;
+    pub(crate) fn new_from_fd(fd: RawFd) -> Result<PipeListener> {
+        let fds = PipeListener::new_monitor_fd()?;
 
-        Ok(LinuxListener {
+        Ok(PipeListener {
             fd,
             monitor_fd: fds,
         })
@@ -92,12 +73,8 @@ impl LinuxListener {
 
         Ok(fds)
     }
-}
 
-impl Listener for LinuxListener {
-    type Type = LinuxConnection;
-
-    fn accept(&mut self, quitFlag: &Arc<AtomicBool>) ->  std::result::Result<Option<Self::Type>, io::Error> {
+    pub(crate) fn accept(&mut self, quitFlag: &Arc<AtomicBool>) ->  std::result::Result<Option<PipeConnection>, io::Error> {
         if quitFlag.load(Ordering::SeqCst) {
             info!("listener shutdown for quit flag");
             return Err(io::Error::new(io::ErrorKind::Other, "listener shutdown for quit flag"));
@@ -174,11 +151,9 @@ impl Listener for LinuxListener {
         };
 
 
-        Ok(Some(LinuxConnection { fd }))
+        Ok(Some(PipeConnection { fd }))
     }
-}
 
-impl Close for LinuxListener {
     fn close(&self) -> Result<()> {
         close(self.monitor_fd.1).unwrap_or_else(|e| {
             warn!(
@@ -188,26 +163,25 @@ impl Close for LinuxListener {
         });
         Ok(())
     }
-
 }
 
 
-pub struct LinuxConnection {
+pub struct PipeConnection {
     fd: RawFd,
 }
 
-impl LinuxConnection {
-    pub(crate) fn new(fd: RawFd) -> LinuxConnection {
-        LinuxConnection { fd }
+impl PipeConnection {
+    pub(crate) fn new(fd: RawFd) -> PipeConnection {
+        PipeConnection { fd }
     }
 }
 
-impl PipeConnection for LinuxConnection {
-    fn id(&self) -> i32 {
+impl PipeConnection {
+    pub(crate) fn id(&self) -> i32 {
         self.fd as i32
     }
 
-    fn read(&self, buf: &mut [u8]) -> Result<usize> {
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
         loop {
             match  recv(self.fd, buf, MsgFlags::empty()) {
                 Ok(l) => return Ok(l),
@@ -222,7 +196,7 @@ impl PipeConnection for LinuxConnection {
         }
     }
 
-    fn write(&self, buf: &[u8]) -> Result<usize> {
+    pub fn write(&self, buf: &[u8]) -> Result<usize> {
         loop {
             match send(self.fd, &buf, MsgFlags::empty()) {
                 Ok(l) => return Ok(l),
@@ -237,9 +211,7 @@ impl PipeConnection for LinuxConnection {
         }
         
     }
-}
 
-impl Close for LinuxConnection {
     fn close(&self) -> Result<()> {
         unimplemented!()
     }

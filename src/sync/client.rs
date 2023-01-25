@@ -26,7 +26,7 @@ use std::{io, thread};
 use crate::common::set_fd_close_exec;
 use crate::common::{client_connect, SOCK_CLOEXEC};
 use crate::error::{Error, Result};
-use crate::net::LinuxConnection;
+use crate::net::PipeConnection;
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
 use std::time::Duration;
@@ -81,7 +81,7 @@ impl Client {
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
-                let c = Arc::new( LinuxConnection::new(fd));
+                let c = Arc::new( PipeConnection::new(fd));
                 if let Err(e) = write_message(&c, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
@@ -143,7 +143,7 @@ impl Client {
 
                 let mh;
                 let buf;
-                let c = Arc::new(LinuxConnection::new(fd));
+                let c = Arc::new(PipeConnection::new(fd));
                 match read_message(&c) {
                     Ok((x, y)) => {
                         mh = x;

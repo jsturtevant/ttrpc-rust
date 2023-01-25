@@ -33,7 +33,7 @@ use crate::error::{get_status, Error, Result};
 use crate::proto::{Code, MessageHeader, Request, Response, MESSAGE_TYPE_REQUEST};
 use crate::sync::channel::{read_message, write_message};
 use crate::{MethodHandler, TtrpcContext};
-use crate::net::{LinuxListener, Listener, PipeConnection, LinuxConnection};
+use crate::net::{PipeListener, PipeConnection};
 
 // poll_queue will create WAIT_THREAD_COUNT_DEFAULT threads in begin.
 // If wait thread count < WAIT_THREAD_COUNT_MIN, create number to WAIT_THREAD_COUNT_DEFAULT.
@@ -61,7 +61,7 @@ pub struct Server {
 
 struct Connection
  {
-    fd: Arc<LinuxConnection>,
+    fd: Arc<PipeConnection>,
     quit: Arc<AtomicBool>,
     handler: Option<JoinHandle<()>>,
 }
@@ -78,7 +78,7 @@ impl Connection
 
 struct ThreadS<'a> 
 {
-    fd:  &'a Arc<LinuxConnection>,
+    fd:  &'a Arc<PipeConnection>,
     fdlock: &'a Arc<Mutex<()>>,
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
@@ -92,7 +92,7 @@ struct ThreadS<'a>
 
 #[allow(clippy::too_many_arguments)]
 fn start_method_handler_thread(
-    fd: Arc<LinuxConnection>,
+    fd: Arc<PipeConnection>,
     fdlock: Arc<Mutex<()>>,
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
@@ -289,7 +289,7 @@ impl Server {
             ));
         }
 
-        let listener = LinuxListener::new(sockaddr)?;
+        let listener = PipeListener::new(sockaddr)?;
 
         self.listeners.push(listener.as_raw_fd());
         Ok(self)
@@ -302,7 +302,7 @@ impl Server {
             ));
         }
 
-        let listener = LinuxListener::new_from_fd(fd)?;
+        let listener = PipeListener::new_from_fd(fd)?;
         
         self.listeners.push(listener.as_raw_fd());
 
@@ -388,7 +388,7 @@ impl Server {
             .name("listener_loop".into())
             .spawn(move || {
                 
-                let mut listener = LinuxListener::new_from_fd(listenerFD).unwrap();
+                let mut listener = PipeListener::new_from_fd(listenerFD).unwrap();
 
                 loop {   
                     let pipeConnection = match listener.accept(&listener_quit_flag) {
@@ -411,8 +411,6 @@ impl Server {
                     let reaper_tx_child = reaper_tx.clone();
                     let pipeArc = Arc::new(pipeConnection);
                     let pipeChild = pipeArc.clone();
-
-
 
                     let handler = thread::Builder::new()
                         .name("client_handler".into())
