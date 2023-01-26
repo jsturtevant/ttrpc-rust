@@ -296,6 +296,7 @@ impl Server {
         Ok(self)
     }
 
+    #[cfg(target_os = "linux")]
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -500,7 +501,7 @@ impl Server {
         }
         if self.thread_count_default <= self.thread_count_min {
             return Err(Error::Others(
-                "thread_count_default should biger than thread_count_min".to_string(),
+                "thread_count_default should bigger than thread_count_min".to_string(),
             ));
         }
         self.start_listen()?;

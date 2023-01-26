@@ -16,6 +16,7 @@
 
 
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
 use std::os::unix::io::RawFd;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -45,9 +46,10 @@ impl Client {
         Ok(Self::new_client(conn))
     }
 
+    #[cfg(target_os = "linux")]
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
-        let conn = ClientConnection::new(fd);
+        let conn = ClientConnection::new();
 
         Self::new_client(conn)
     }
