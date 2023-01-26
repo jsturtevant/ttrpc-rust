@@ -31,6 +31,10 @@ pub enum Error {
     #[error("Nix error: {0}")]
     Nix(#[from] nix::Error),
 
+    #[cfg(target_os = "windows")]
+    #[error("Windows error: {0}")]
+    Windows(i32), 
+
     #[error("ttrpc err: local stream closed")]
     LocalClosed,
 

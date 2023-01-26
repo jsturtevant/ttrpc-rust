@@ -19,8 +19,11 @@ use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use ttrpc::context::{self, Context};
 use ttrpc::Client;
+use log::LevelFilter;
 
 fn main() {
+    simple_logging::log_to_stderr(LevelFilter::Trace);
+
     let c = Client::connect(utils::SOCK_ADDR).unwrap();
     let hc = health_ttrpc::HealthClient::new(c.clone());
     let ac = agent_ttrpc::AgentServiceClient::new(c);
@@ -30,44 +33,44 @@ fn main() {
 
     let now = std::time::Instant::now();
 
-    let t = thread::spawn(move || {
-        let req = health::CheckRequest::new();
-        println!(
-            "OS Thread {:?} - {} started: {:?}",
-            std::thread::current().id(),
-            "health.check()",
-            now.elapsed(),
-        );
-        println!(
-            "OS Thread {:?} - {} -> {:?} ended: {:?}",
-            std::thread::current().id(),
-            "health.check()",
-            thc.check(default_ctx(), &req),
-            now.elapsed(),
-        );
-    });
+    // let t = thread::spawn(move || {
+    //     let req = health::CheckRequest::new();
+    //     println!(
+    //         "OS Thread {:?} - {} started: {:?}",
+    //         std::thread::current().id(),
+    //         "health.check()",
+    //         now.elapsed(),
+    //     );
+    //     println!(
+    //         "OS Thread {:?} - {} -> {:?} ended: {:?}",
+    //         std::thread::current().id(),
+    //         "health.check()",
+    //         thc.check(default_ctx(), &req),
+    //         now.elapsed(),
+    //     );
+    // });
 
-    let t2 = thread::spawn(move || {
-        println!(
-            "OS Thread {:?} - {} started: {:?}",
-            std::thread::current().id(),
-            "agent.list_interfaces()",
-            now.elapsed(),
-        );
+    // let t2 = thread::spawn(move || {
+    //     println!(
+    //         "OS Thread {:?} - {} started: {:?}",
+    //         std::thread::current().id(),
+    //         "agent.list_interfaces()",
+    //         now.elapsed(),
+    //     );
 
-        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
-            Err(e) => format!("{:?}", e),
-            Ok(s) => format!("{:?}", s),
-        };
+    //     let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
+    //         Err(e) => format!("{:?}", e),
+    //         Ok(s) => format!("{:?}", s),
+    //     };
 
-        println!(
-            "OS Thread {:?} - {} -> {} ended: {:?}",
-            std::thread::current().id(),
-            "agent.list_interfaces()",
-            show,
-            now.elapsed(),
-        );
-    });
+    //     println!(
+    //         "OS Thread {:?} - {} -> {} ended: {:?}",
+    //         std::thread::current().id(),
+    //         "agent.list_interfaces()",
+    //         show,
+    //         now.elapsed(),
+    //     );
+    // });
 
     println!(
         "Main OS Thread - {} started: {:?}",
@@ -99,8 +102,8 @@ fn main() {
         now.elapsed()
     );
 
-    t.join().unwrap();
-    t2.join().unwrap();
+    //t.join().unwrap();
+    //t2.join().unwrap();
 }
 
 fn default_ctx() -> Context {

@@ -65,7 +65,11 @@ impl Client {
 
         //Sender
         let recver_map = recver_map_orig.clone();
-        let sender_client = client.clone();
+
+        let connection = Arc::new(Mutex::new(client.get_pipe_connection()));
+
+        let mut recieve_client = connection.clone();
+
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
@@ -78,8 +82,9 @@ impl Client {
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
-                let c = sender_client.get_pipe_connection();
-                if let Err(e) = write_message(&c, mh, buf) {
+
+                trace!("writing msg: {}", recieve_client.lock().unwrap().id());
+                if let Err(e) = write_message(&mut recieve_client.lock().unwrap(), mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = recver_map.lock().unwrap();
@@ -94,6 +99,7 @@ impl Client {
         });
 
         //Recver
+        let mut reciever_connection = connection.clone();
         let reciever_client = client.clone();
         thread::spawn(move || {
           
@@ -113,9 +119,8 @@ impl Client {
                 let mh;
                 let buf;
 
-                let pipe_connection = reciever_client.get_pipe_connection();
-
-                match read_message(&pipe_connection) {
+                trace!("read msg: {}", reciever_connection.lock().unwrap().id());
+                match read_message(&mut reciever_connection.lock().unwrap()) {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;

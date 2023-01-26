@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Result;
 use std::path::Path;
 
-pub const SOCK_ADDR: &str = "unix:///tmp/ttrpc-test";
+pub const SOCK_ADDR: &str = r"\\.\pipe\mio-named-pipe-test";
 
 pub fn remove_if_sock_exist(sock_addr: &str) -> Result<()> {
     let path = sock_addr

@@ -46,7 +46,7 @@ type MessageReceiver = Receiver<(MessageHeader, Vec<u8>)>;
 
 /// A ttrpc Server (sync).
 pub struct Server {
-    listeners: Vec<Arc<PipeListener>>,
+    listeners: Vec<Arc<Mutex<PipeListener>>>,
     listener_quit_flag: Arc<AtomicBool>,
     connections: Arc<Mutex<HashMap<i32, Connection>>>,
     methods: Arc<HashMap<String, Box<dyn MethodHandler + Send + Sync>>>,
@@ -59,7 +59,7 @@ pub struct Server {
 
 struct Connection
  {
-    fd: Arc<PipeConnection>,
+    fd: Arc<Mutex<PipeConnection>>,
     quit: Arc<AtomicBool>,
     handler: Option<JoinHandle<()>>,
 }
@@ -67,20 +67,20 @@ struct Connection
 impl Connection 
  {
     fn close (&self) {
-        self.fd.close().unwrap_or(());
+        self.fd.lock().unwrap().close().unwrap_or(());
     }
 
     fn shutdown(&self) {
         self.quit.store(true, Ordering::SeqCst);
 
         // in case the connection had closed
-        self.fd.shutdown().unwrap_or(());
+        self.fd.lock().unwrap().shutdown().unwrap_or(());
     }
 }
 
 struct ThreadS<'a> 
 {
-    fd:  &'a Arc<PipeConnection>,
+    fd:  &'a Arc<Mutex<PipeConnection>>,
     fdlock: &'a Arc<Mutex<()>>,
     wtc: &'a Arc<AtomicUsize>,
     quit: &'a Arc<AtomicBool>,
@@ -94,7 +94,7 @@ struct ThreadS<'a>
 
 #[allow(clippy::too_many_arguments)]
 fn start_method_handler_thread(
-    fd: Arc<PipeConnection>,
+    fd: Arc<Mutex<PipeConnection>>,
     fdlock: Arc<Mutex<()>>,
     wtc: Arc<AtomicUsize>,
     quit: Arc<AtomicBool>,
@@ -122,7 +122,8 @@ fn start_method_handler_thread(
                         .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
-                result = read_message(&fd);
+                trace!("Reading Message.... ");
+                result = read_message(&mut fd.lock().unwrap());
             }
 
             if quit.load(Ordering::SeqCst) {
@@ -213,7 +214,7 @@ fn start_method_handler_thread(
                 continue;
             };
             let ctx = TtrpcContext {
-                fd: fd.id(),
+                fd: fd.lock().unwrap().id(),
                 mh,
                 res_tx: res_tx.clone(),
                 metadata: context::from_pb(&req.metadata),
@@ -292,7 +293,7 @@ impl Server {
 
         let listener = PipeListener::new(sockaddr)?;
 
-        self.listeners.push(Arc::new(listener));
+        self.listeners.push(Arc::new(Mutex::new(listener)));
         Ok(self)
     }
 
@@ -392,12 +393,13 @@ impl Server {
                 let listener = listener;
 
                 loop {   
-                    let pipe_connection = match listener.accept(&listener_quit_flag) {
+                    trace!("listening...");
+                    let pipe_connection = match listener.lock().unwrap().accept(&listener_quit_flag) {
                         Ok(None) => {
                             continue;
                         }
                         Ok(Some(conn)) => {
-                           Arc::new(conn)
+                           Arc::new(Mutex::new(conn))
                         }
                         Err(e) => {
                             error!("listener accept got {:?}", e);
@@ -423,7 +425,7 @@ impl Server {
                             let handler = thread::spawn(move || {
                                 for r in res_rx.iter() {
                                     trace!("response thread get {:?}", r);
-                                    if let Err(e) = write_message(&pipe, r.0, r.1) {
+                                    if let Err(e) = write_message(&mut pipe.lock().unwrap(), r.0, r.1) {
                                         error!("write_message got {:?}", e);
                                         quit_res.store(true, Ordering::SeqCst);
                                         break;
@@ -464,7 +466,7 @@ impl Server {
                             handler.join().unwrap_or(());
                             // client_handler should not close fd before exit
                             // , which prevent fd reuse issue.
-                            reaper_tx_child.send(pipe.id()).unwrap();
+                            reaper_tx_child.send(pipe.lock().unwrap().id()).unwrap();
 
                             debug!("client thread quit");
                         })
@@ -472,8 +474,9 @@ impl Server {
 
                     let mut cns = connections.lock().unwrap();
 
+                    let id = pipe_connection.lock().unwrap().id();
                     cns.insert(
-                        pipe_connection.id(),
+                        id,
                         Connection {
                             fd: pipe_connection,
                             handler: Some(handler),
@@ -512,7 +515,7 @@ impl Server {
     pub fn stop_listen(mut self) -> Self {
         self.listener_quit_flag.store(true, Ordering::SeqCst);
 
-        self.listeners[0].close().unwrap();
+        self.listeners[0].lock().unwrap().close().unwrap();
        
         info!("close monitor");
         if let Some(handler) = self.handler.take() {
