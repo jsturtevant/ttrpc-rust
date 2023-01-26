@@ -33,9 +33,11 @@ fn main() {
         .run()
         .expect("Gen sync code failed.");
 
+    #[cfg(feature = "async")]
     // Only async support stream currently.
     protos.push("protocols/protos/streaming.proto");
 
+    #[cfg(feature = "async")]
     Codegen::new()
         .out_dir("protocols/asynchronous")
         .inputs(&protos)
@@ -59,6 +61,7 @@ fn main() {
     )
     .unwrap();
 
+    #[cfg(feature = "async")]
     replace_text_in_file(
         "protocols/asynchronous/oci.rs",
         "self: Box<Self>",

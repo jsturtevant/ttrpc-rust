@@ -10,6 +10,10 @@ repository = "https://github.com/alipay/ttrpc-rust"
 homepage = "https://github.com/alipay/ttrpc-rust"
 description = "An example of ttrpc."
 
+[dependencies]
+tokio = { version = "1.0.1", features = ["signal", "time"], optional = true }
+async-trait = {version="0.1.42", optional = true}
+
 [dev-dependencies]
 protobuf = "3.1.0"
 bytes = "0.4.11"
@@ -18,12 +22,14 @@ byteorder = "1.3.2"
 log = "0.4.6"
 simple-logging = "2.0.2"
 nix = "0.23.0"
-ttrpc = { path = "../", features = ["async"] }
+ttrpc = { path = "../"}
 ctrlc = { version = "3.0", features = ["termination"] }
-tokio = { version = "1.0.1", features = ["signal", "time"] }
-async-trait = "0.1.42"
 rand = "0.8.5"
 
+[features]
+default = ["sync"]
+async = ["tokio", "async-trait", "ttrpc/async"]
+sync = []
 
 [[example]]
 name = "client"
@@ -36,18 +42,22 @@ path = "./server.rs"
 [[example]]
 name = "async-server"
 path = "./async-server.rs"
+required-features = ["async"]
 
 [[example]]
 name = "async-client"
 path = "./async-client.rs"
+required-features = ["async"]
 
 [[example]]
 name = "async-stream-server"
 path = "./async-stream-server.rs"
+required-features = ["async"]
 
 [[example]]
 name = "async-stream-client"
 path = "./async-stream-client.rs"
+required-features = ["async"]
 
 [build-dependencies]
 ttrpc-codegen = { path = "../ttrpc-codegen"}
