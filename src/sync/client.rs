@@ -14,18 +14,19 @@
 
 //! Sync client of ttrpc.
 
+#[cfg(unix)]
+use std::os::unix::io::RawFd;
 
 use std::collections::HashMap;
-use std::os::unix::io::RawFd;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{thread};
+use std::time::Duration;
 
 use crate::error::{Error, Result};
 use crate::sync::sys::{ClientConnection};
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
-use std::time::Duration;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
@@ -45,6 +46,7 @@ impl Client {
         Ok(Self::new_client(conn))
     }
 
+    #[cfg(unix)]
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
         let conn = ClientConnection::new(fd);
@@ -55,15 +57,16 @@ impl Client {
     fn new_client(pipe_client: ClientConnection) -> Client {
         let client = Arc::new(pipe_client);
         
-
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
-
-        
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
         //Sender
         let recver_map = recver_map_orig.clone();
-        let sender_client = client.clone();
+
+        let connection = Arc::new(client.get_pipe_connection());
+
+        let recieve_client = connection.clone();
+
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
@@ -76,8 +79,8 @@ impl Client {
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
-                let c = sender_client.get_pipe_connection();
-                if let Err(e) = write_message(&c, mh, buf) {
+
+                if let Err(e) = write_message(&recieve_client, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = recver_map.lock().unwrap();
@@ -92,6 +95,7 @@ impl Client {
         });
 
         //Recver
+        let reciever_connection = connection;
         let reciever_client = client.clone();
         thread::spawn(move || {
           
@@ -111,9 +115,7 @@ impl Client {
                 let mh;
                 let buf;
 
-                let pipe_connection = reciever_client.get_pipe_connection();
-
-                match read_message(&pipe_connection) {
+                match read_message(&reciever_connection) {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;

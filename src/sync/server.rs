@@ -15,7 +15,7 @@
 //! Sync server of ttrpc.
 //! 
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 use protobuf::{CodedInputStream, Message};
@@ -296,6 +296,7 @@ impl Server {
         Ok(self)
     }
 
+    #[cfg(unix)]
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -391,6 +392,7 @@ impl Server {
                 let listener = listener;
 
                 loop {   
+                    trace!("listening...");
                     let pipe_connection = match listener.accept(&listener_quit_flag) {
                         Ok(None) => {
                             continue;
@@ -471,8 +473,9 @@ impl Server {
 
                     let mut cns = connections.lock().unwrap();
 
+                    let id = pipe_connection.id();
                     cns.insert(
-                        pipe_connection.id(),
+                        id,
                         Connection {
                             fd: pipe_connection,
                             handler: Some(handler),
@@ -500,7 +503,7 @@ impl Server {
         }
         if self.thread_count_default <= self.thread_count_min {
             return Err(Error::Others(
-                "thread_count_default should biger than thread_count_min".to_string(),
+                "thread_count_default should bigger than thread_count_min".to_string(),
             ));
         }
         self.start_listen()?;
@@ -545,14 +548,14 @@ impl Server {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl FromRawFd for Server {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         Self::default().add_listener(fd).unwrap()
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
         self.listeners[0].as_raw_fd()

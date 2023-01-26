@@ -21,7 +21,13 @@ build: debug
 
 .PHONY: test
 test:
+ifeq ($OS,Windows_NT)
 	cargo test --all-features --verbose
+else
+# async isn't enabled for windows yet
+	cargo test --verbose
+endif
+	
 
 .PHONY: check
 check:

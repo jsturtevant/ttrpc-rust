@@ -6,7 +6,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -33,6 +33,18 @@ jobs:
           make -C compiler
           make -C ttrpc-codegen
           make -C example build-examples
+
+  # Windows doesn't have async enabled currently, so can't test all features        
+  clippy_windows_check:
+    name: Clippy Check
+    runs-on:  windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: rustup component add clippy
+      - uses: tim-actions/clippy-check@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: checks-${{ matrix.os }}
 
   deny:
     runs-on: ubuntu-latest

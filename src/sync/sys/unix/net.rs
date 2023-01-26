@@ -22,13 +22,9 @@ use nix::unistd::*;
 use std::sync::{Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::common::{self, client_connect, SOCK_CLOEXEC};
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")] 
 use crate::common::set_fd_close_exec;
 use nix::sys::socket::{self};
-#[cfg(target_os = "macos")]
-use crate::common::set_fd_close_exec;
-
-
 
 pub struct PipeListener {
     fd: RawFd,
@@ -68,7 +64,7 @@ impl PipeListener {
         let fds = pipe2(nix::fcntl::OFlag::O_CLOEXEC)?;
  
         
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")] 
         let fds = {
             let (rfd, wfd) = pipe()?;
             set_fd_close_exec(rfd)?;
@@ -141,18 +137,18 @@ impl PipeListener {
         // Non Linux platforms do not support accept4 with SOCK_CLOEXEC flag, so instead
         // use accept and call fcntl separately to set SOCK_CLOEXEC.
         // Because of this there is chance of the descriptor leak if fork + exec happens in between.
-        #[cfg(not(target_os = "linux"))]
-        let fd = match accept(listener) {
+        #[cfg(target_os = "macos")] 
+        let fd = match accept(self.fd) {
             Ok(fd) => {
                 if let Err(err) = set_fd_close_exec(fd) {
                     error!("fcntl failed after accept: {:?}", err);
-                    break;
+                    return Err(io::Error::new(io::ErrorKind::Other, format!("{err:?}")));
                 };
                 fd
             }
             Err(e) => {
                 error!("failed to accept error {:?}", e);
-                break;
+                return Err(std::io::Error::from_raw_os_error(e as i32));
             }
         };
 
@@ -182,7 +178,7 @@ impl PipeConnection {
     }
 
     pub(crate) fn id(&self) -> i32 {
-        self.fd as i32
+        self.fd
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
@@ -255,7 +251,7 @@ impl ClientConnection {
 
 
         ClientConnection { 
-            fd:fd, 
+            fd, 
             socket_pair: (recver_fd, close_fd) 
         }
     }
@@ -319,8 +315,8 @@ impl ClientConnection {
 
     pub fn close(&self) -> Result<()> {
         match close(self.socket_pair.1) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(crate::Error::Nix(e))
+            Ok(_) => {},
+            Err(e) => return Err(crate::Error::Nix(e))
         };
 
         match close(self.fd) {
