@@ -1,2 +1,2 @@
 mod net;
-pub use net::{PipeConnection, PipeListener};
+pub use net::{PipeConnection, PipeListener, ClientConnection};

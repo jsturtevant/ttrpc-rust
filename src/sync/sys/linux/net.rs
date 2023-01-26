@@ -21,10 +21,13 @@ use std::os::unix::prelude::AsRawFd;
 use nix::unistd::*;
 use std::sync::{Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
-use crate::common;
+use crate::common::{self, client_connect, SOCK_CLOEXEC};
 #[cfg(not(target_os = "linux"))]
 use crate::common::set_fd_close_exec;
 use nix::sys::socket::{self};
+#[cfg(target_os = "macos")]
+use crate::common::set_fd_close_exec;
+
 
 
 pub struct PipeListener {
@@ -177,9 +180,7 @@ impl PipeConnection {
     pub(crate) fn new(fd: RawFd) -> PipeConnection {
         PipeConnection { fd }
     }
-}
 
-impl PipeConnection {
     pub(crate) fn id(&self) -> i32 {
         self.fd as i32
     }
@@ -212,7 +213,6 @@ impl PipeConnection {
                 }
             }
         }
-        
     }
 
     pub fn close(&self) -> Result<()> {
@@ -230,6 +230,107 @@ impl PipeConnection {
     }
 }
 
+pub struct ClientConnection {
+    fd: RawFd,
+    socket_pair: (RawFd, RawFd),
+}
+
+impl ClientConnection {
+    pub fn client_connect(sockaddr: &str)-> Result<ClientConnection>   {
+        let fd = unsafe { client_connect(sockaddr)? };
+        Ok(ClientConnection::new(fd))
+    }
+
+    pub(crate) fn new(fd: RawFd) -> ClientConnection {
+        let (recver_fd, close_fd) =
+            socketpair(AddressFamily::Unix, SockType::Stream, None, SOCK_CLOEXEC).unwrap();
+
+        // MacOS doesn't support descriptor creation with SOCK_CLOEXEC automically,
+        // so there is a chance of leak if fork + exec happens in between of these calls.
+        #[cfg(target_os = "macos")]
+        {
+            set_fd_close_exec(recver_fd).unwrap();
+            set_fd_close_exec(close_fd).unwrap();
+        }
+
+
+        ClientConnection { 
+            fd:fd, 
+            socket_pair: (recver_fd, close_fd) 
+        }
+    }
+
+    pub fn ready(&self) -> std::result::Result<Option<()>, io::Error> {
+        let mut pollers = vec![
+            libc::pollfd {
+                fd: self.socket_pair.0,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: self.fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+
+        let returned = unsafe {
+            let pollers: &mut [libc::pollfd] = &mut pollers;
+            libc::poll(
+                pollers as *mut _ as *mut libc::pollfd,
+                pollers.len() as _,
+                -1,
+            )
+        };
+
+        if returned == -1 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EINTR) {
+                return Ok(None)
+            }
+
+            error!("fatal error in process reaper:{}", err);
+            return Err(err);
+        } else if returned < 1 {
+            return Ok(None)
+        }
+
+        if pollers[0].revents != 0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "pipe closed"));
+        }
+
+        if pollers[pollers.len() - 1].revents == 0 {
+            return Ok(None)
+        }
+
+        Ok(Some(()))
+    }
+
+    pub fn get_pipe_connection(&self) -> PipeConnection {
+        PipeConnection::new(self.fd)
+    }
+
+    pub fn close_receiver(&self) -> Result<()> {
+        match close(self.socket_pair.0) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(crate::Error::Nix(e))
+        }
+    }
+
+    pub fn close(&self) -> Result<()> {
+        match close(self.socket_pair.1) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(crate::Error::Nix(e))
+        };
+
+        match close(self.fd) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(crate::Error::Nix(e))
+        }
+    }
+        
+    
+}
 fn retryable(e: nix::Error) -> bool {
     use ::nix::Error;
     e == Error::EINTR || e == Error::EAGAIN
