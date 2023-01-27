@@ -66,7 +66,7 @@ impl Client {
         //Sender
         let recver_map = recver_map_orig.clone();
 
-        let connection = Arc::new(Mutex::new(client.get_pipe_connection()));
+        let connection = Arc::new(client.get_pipe_connection());
 
         let mut recieve_client = connection.clone();
 
@@ -83,8 +83,8 @@ impl Client {
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
 
-                trace!("writing msg: {}", recieve_client.lock().unwrap().id());
-                if let Err(e) = write_message(&mut recieve_client.lock().unwrap(), mh, buf) {
+                trace!("writing msg: {}", recieve_client.id());
+                if let Err(e) = write_message(&recieve_client, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
                         let mut map = recver_map.lock().unwrap();
@@ -119,8 +119,8 @@ impl Client {
                 let mh;
                 let buf;
 
-                trace!("read msg: {}", reciever_connection.lock().unwrap().id());
-                match read_message(&mut reciever_connection.lock().unwrap()) {
+                trace!("read msg: {}", reciever_connection.id());
+                match read_message(&reciever_connection) {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;
