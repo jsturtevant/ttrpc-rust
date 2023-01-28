@@ -13,17 +13,17 @@
 // limitations under the License.
 
 use crate::error::Result;
-use crate::sync;
+
 use mio::windows::NamedPipe;
 use std::ffi::OsStr;
 use std::fs::OpenOptions;
-use std::{io, thread};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, RawHandle};
-use std::sync::atomic::{AtomicBool, Ordering, AtomicI32};
+use std::os::windows::io::{FromRawHandle, IntoRawHandle, RawHandle};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{io, thread};
+
 use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
@@ -39,17 +39,17 @@ const SERVER: Token = Token(0);
 const CLIENT: Token = Token(1);
 
 pub struct PipeListener {
-    firstInstance: AtomicBool,
+    first_instance: AtomicBool,
     address: String,
-    instanceNumber: AtomicI32,
+    instance_number: AtomicI32,
 }
 
 impl PipeListener {
     pub(crate) fn new(sockaddr: &str) -> Result<PipeListener> {
         Ok(PipeListener {
-            firstInstance: AtomicBool::new(true),
+            first_instance: AtomicBool::new(true),
             address: sockaddr.to_string(),
-            instanceNumber:  AtomicI32::new(1)
+            instance_number: AtomicI32::new(1),
         })
     }
 
@@ -65,21 +65,29 @@ impl PipeListener {
             ));
         }
 
-        let pipe_instance = self.new_instance().unwrap();
+        // Create a new pipe for every new client
+        let mut namedpipe = self.new_instance().unwrap();
 
-    
-        println!("waiting for connection....");
+        let mut poll = Poll::new().unwrap();
+        let mut events = Events::with_capacity(1024);
+        poll.registry()
+            .register(
+                &mut namedpipe,
+                SERVER,
+                Interest::WRITABLE | Interest::READABLE,
+            )
+            .unwrap();
+
         loop {
-            match pipe_instance.namedPipe.lock().unwrap().connect() {
+            match namedpipe.connect() {
                 Ok(()) => {
-                    println!("Server Connected!");
-                    trace!("handed off pipe instance : {}", pipe_instance.id());
+                    // pipe is locked so can't use it here.
                     break;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    {
-                        continue;
-                    }
+                    println!("waiting for client to connect");
+                    poll.poll(&mut events, None).unwrap();
+                    continue;
                 }
                 Err(e) => {
                     println!("Error connecting to pipe: {}", e);
@@ -88,10 +96,24 @@ impl PipeListener {
             }
         }
 
-        return Ok(Some(pipe_instance))
+        let _h = thread::spawn(move || {
+            let mut poller = poll;
+            let mut events = Events::with_capacity(1024);
+            loop {
+                poller.poll(&mut events, None).unwrap();
+            }
+        });
+
+        let instance_num = self.instance_number.fetch_add(1, Ordering::SeqCst);
+        trace!("pipe instance {} connected", instance_num);
+        let pipe_instance = PipeConnection {
+            named_pipe: Mutex::new(namedpipe),
+            instance_number: instance_num,
+        };
+        return Ok(Some(pipe_instance));
     }
 
-    fn new_instance(& self) -> io::Result<PipeConnection> {
+    fn new_instance(&self) -> io::Result<NamedPipe> {
         let name = OsStr::new(&self.address.as_str())
             .encode_wide()
             .chain(Some(0)) // add NULL termination
@@ -100,9 +122,9 @@ impl PipeListener {
         // bitwise or file_flag_first_pipe_instance with file_flag_overlapped and pipe_access_duplex
         let mut openmode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
 
-        if self.firstInstance.load(Ordering::SeqCst) {
+        if self.first_instance.load(Ordering::SeqCst) {
             openmode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
-            self.firstInstance.swap(false, Ordering::SeqCst);
+            self.first_instance.swap(false, Ordering::SeqCst);
         }
 
         // Safety: syscall
@@ -122,30 +144,9 @@ impl PipeListener {
         if h == INVALID_HANDLE_VALUE {
             Err(io::Error::last_os_error())
         } else {
-            let instance_num = self.instanceNumber.fetch_add(1, Ordering::SeqCst);
-            trace!("created pipe instance : {}", instance_num);
+            let mut pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
 
-            let mut pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle)};
-
-            let poll = Poll::new().unwrap();
-            {
-                poll
-                .registry()
-                .register(&mut pipe, SERVER, Interest::WRITABLE | Interest::READABLE)
-                .unwrap();
-            }
-       
-            let h = thread::spawn(move || {
-                let mut poller = poll;
-                let mut events = Events::with_capacity(1024);
-                loop {
-                    poller.poll(&mut events, None).unwrap();
-                }
-            });
-
-            Ok(PipeConnection {
-                namedPipe:  Mutex::new(pipe),
-                instance_number: instance_num })
+            Ok(pipe)
         }
     }
 
@@ -155,7 +156,7 @@ impl PipeListener {
 }
 
 pub struct PipeConnection {
-    namedPipe: Mutex<NamedPipe>,
+    named_pipe: Mutex<NamedPipe>,
     instance_number: i32,
 }
 
@@ -164,17 +165,16 @@ unsafe impl Sync for PipeConnection {}
 
 impl PipeConnection {
     pub(crate) fn new(h: RawHandle) -> PipeConnection {
-        let mut pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle)};
+        let mut pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
 
         let poll = Poll::new().unwrap();
         {
-            poll
-            .registry()
-            .register(&mut pipe, CLIENT, Interest::WRITABLE | Interest::READABLE)
-            .unwrap();
+            poll.registry()
+                .register(&mut pipe, CLIENT, Interest::WRITABLE | Interest::READABLE)
+                .unwrap();
         }
-       
-        let h = thread::spawn(move || {
+
+        let _h = thread::spawn(move || {
             let mut poller = poll;
             let mut events = Events::with_capacity(1024);
             loop {
@@ -183,7 +183,7 @@ impl PipeConnection {
         });
 
         PipeConnection {
-            namedPipe: Mutex::new(pipe),
+            named_pipe: Mutex::new(pipe),
             instance_number: 0, //todo
         }
     }
@@ -194,12 +194,13 @@ impl PipeConnection {
         self.instance_number
     }
 
-    pub fn read(& self, buf: &mut [u8]) -> Result<usize> {
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
         trace!("reading from  pipe: {}", self.instance_number);
-        
+
         loop {
-            //trace!("waiting for msg: {}", self.instance_number);
-            match self.namedPipe.lock().unwrap().read(buf) {
+            // grabbing the lock here to read isn't ideal
+            // the named pipe needs mutable access to read
+            match self.named_pipe.lock().unwrap().read(buf) {
                 Ok(0) => {
                     return Err(crate::Error::LocalClosed);
                 }
@@ -207,9 +208,7 @@ impl PipeConnection {
                     //print!("read: {:?}", std::str::from_utf8(&buf));
                     return Ok(x);
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue 
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
                 Err(e) if e.raw_os_error() != None => {
                     return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
                 }
@@ -219,18 +218,16 @@ impl PipeConnection {
                 }
             }
         }
-        
-        
     }
 
-    pub fn write(& self, buf: &[u8]) -> Result<usize> {
+    pub fn write(&self, buf: &[u8]) -> Result<usize> {
         trace!("Writing to  pipe: {}", self.instance_number);
-        
+
         loop {
-            match self.namedPipe.lock().unwrap().write(buf) {
-                Ok(x) => return {           
-                    Ok(x)
-                },
+            // grabbing the lock write to read isn't ideal
+            // the named pipe needs mutable access to read
+            match self.named_pipe.lock().unwrap().write(buf) {
+                Ok(x) => return { Ok(x) },
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     continue;
                 }
@@ -249,10 +246,12 @@ impl PipeConnection {
     }
 
     pub fn close(&self) -> Result<()> {
+        //todo
         Ok(())
     }
 
     pub fn shutdown(&self) -> Result<()> {
+        //todo
         Ok(())
     }
 }
@@ -260,7 +259,7 @@ impl PipeConnection {
 pub struct ClientConnection {}
 
 impl ClientConnection {
-    pub fn client_connect(sockaddr: &str) -> Result<ClientConnection> {
+    pub fn client_connect(_sockaddr: &str) -> Result<ClientConnection> {
         Ok(ClientConnection::new())
     }
 
@@ -278,16 +277,17 @@ impl ClientConnection {
             .write(true)
             .custom_flags(FILE_FLAG_OVERLAPPED);
         let file = opts.open(r"\\.\pipe\mio-named-pipe-test");
-        let mut pipe = PipeConnection::new(file.unwrap().into_raw_handle());
-        
-        pipe
+
+        PipeConnection::new(file.unwrap().into_raw_handle())
     }
 
     pub fn close_receiver(&self) -> Result<()> {
+        //todo
         Ok(())
     }
 
     pub fn close(&self) -> Result<()> {
+        //todo
         Ok(())
     }
 }

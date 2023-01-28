@@ -57,10 +57,7 @@ impl Client {
     fn new_client(pipe_client: ClientConnection) -> Client {
         let client = Arc::new(pipe_client);
         
-
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
-
-        
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
         //Sender
@@ -68,7 +65,7 @@ impl Client {
 
         let connection = Arc::new(client.get_pipe_connection());
 
-        let mut recieve_client = connection.clone();
+        let recieve_client = connection.clone();
 
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
@@ -83,7 +80,6 @@ impl Client {
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
 
-                trace!("writing msg: {}", recieve_client.id());
                 if let Err(e) = write_message(&recieve_client, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
@@ -99,7 +95,7 @@ impl Client {
         });
 
         //Recver
-        let mut reciever_connection = connection.clone();
+        let reciever_connection = connection;
         let reciever_client = client.clone();
         thread::spawn(move || {
           
@@ -119,7 +115,6 @@ impl Client {
                 let mh;
                 let buf;
 
-                trace!("read msg: {}", reciever_connection.id());
                 match read_message(&reciever_connection) {
                     Ok((x, y)) => {
                         mh = x;

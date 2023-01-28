@@ -122,7 +122,6 @@ fn start_method_handler_thread(
                         .unwrap_or_else(|err| trace!("Failed to send {:?}", err));
                     break;
                 }
-                trace!("Reading Message.... ");
                 result = read_message(&fd);
             }
 
