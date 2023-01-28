@@ -15,6 +15,7 @@
 use crate::error::Result;
 
 use mio::windows::NamedPipe;
+
 use std::ffi::OsStr;
 use std::fs::OpenOptions;
 use std::os::windows::ffi::OsStrExt;
@@ -23,6 +24,7 @@ use std::os::windows::io::{FromRawHandle, IntoRawHandle, RawHandle};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
+
 
 use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
@@ -74,7 +76,7 @@ impl PipeListener {
             .register(
                 &mut namedpipe,
                 SERVER,
-                Interest::WRITABLE | Interest::READABLE,
+                Interest::WRITABLE,
             )
             .unwrap();
 
@@ -96,6 +98,13 @@ impl PipeListener {
             }
         }
 
+        poll.registry()
+            .reregister(
+                &mut namedpipe,
+                SERVER,
+                Interest::READABLE,
+            )
+            .unwrap();
         let instance_num = self.instance_number.fetch_add(1, Ordering::SeqCst);
         trace!("pipe instance {} connected", instance_num);
         let pipe_instance = PipeConnection {
@@ -167,6 +176,7 @@ impl PipeConnection {
             .register(&mut pipe, CLIENT, Interest::WRITABLE | Interest::READABLE)
             .unwrap();
 
+
         PipeConnection {
             named_pipe: Mutex::new(pipe),
             poller: Mutex::new(poll),
@@ -185,8 +195,9 @@ impl PipeConnection {
 
         let mut events = Events::with_capacity(1024);
         loop {
-            // grabbing the lock here to read isn't ideal
-            // the named pipe needs mutable access to read
+            // grabbing the lock on the poller here isn't ideal but the named pipe needs mutable access to read
+            // This is ok though as read is currently blocking other threads in the server impl (only one read at a time)
+            // It is also blocking until read event comes through.  This is preferable as it will not cause any cpu cycles 
             self.poller.lock().unwrap().poll(&mut events, None).unwrap();
             match self.named_pipe.lock().unwrap().read(buf) {
                 Ok(0) => {
