@@ -96,18 +96,11 @@ impl PipeListener {
             }
         }
 
-        let _h = thread::spawn(move || {
-            let mut poller = poll;
-            let mut events = Events::with_capacity(1024);
-            loop {
-                poller.poll(&mut events, None).unwrap();
-            }
-        });
-
         let instance_num = self.instance_number.fetch_add(1, Ordering::SeqCst);
         trace!("pipe instance {} connected", instance_num);
         let pipe_instance = PipeConnection {
             named_pipe: Mutex::new(namedpipe),
+            poller: Mutex::new(poll),
             instance_number: instance_num,
         };
         return Ok(Some(pipe_instance));
@@ -158,6 +151,7 @@ impl PipeListener {
 pub struct PipeConnection {
     named_pipe: Mutex<NamedPipe>,
     instance_number: i32,
+    poller: Mutex<Poll>,
 }
 
 unsafe impl Send for PipeConnection {}
@@ -168,23 +162,15 @@ impl PipeConnection {
         let mut pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
 
         let poll = Poll::new().unwrap();
-        {
-            poll.registry()
-                .register(&mut pipe, CLIENT, Interest::WRITABLE | Interest::READABLE)
-                .unwrap();
-        }
 
-        let _h = thread::spawn(move || {
-            let mut poller = poll;
-            let mut events = Events::with_capacity(1024);
-            loop {
-                poller.poll(&mut events, None).unwrap();
-            }
-        });
+        poll.registry()
+            .register(&mut pipe, CLIENT, Interest::WRITABLE | Interest::READABLE)
+            .unwrap();
 
         PipeConnection {
             named_pipe: Mutex::new(pipe),
-            instance_number: 0, //todo
+            poller: Mutex::new(poll),
+            instance_number: 0, //todo for client scenarios
         }
     }
 }
@@ -197,9 +183,11 @@ impl PipeConnection {
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
         trace!("reading from  pipe: {}", self.instance_number);
 
+        let mut events = Events::with_capacity(1024);
         loop {
             // grabbing the lock here to read isn't ideal
             // the named pipe needs mutable access to read
+            self.poller.lock().unwrap().poll(&mut events, None).unwrap();
             match self.named_pipe.lock().unwrap().read(buf) {
                 Ok(0) => {
                     return Err(crate::Error::LocalClosed);
@@ -208,7 +196,9 @@ impl PipeConnection {
                     //print!("read: {:?}", std::str::from_utf8(&buf));
                     return Ok(x);
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    continue;
+                }
                 Err(e) if e.raw_os_error() != None => {
                     return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
                 }
@@ -222,7 +212,6 @@ impl PipeConnection {
 
     pub fn write(&self, buf: &[u8]) -> Result<usize> {
         trace!("Writing to  pipe: {}", self.instance_number);
-
         loop {
             // grabbing the lock write to read isn't ideal
             // the named pipe needs mutable access to read
