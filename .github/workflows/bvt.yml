@@ -31,7 +31,6 @@ jobs:
       - uses: tim-actions/clippy-check@master
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
           name: checks-${{ matrix.os }}
 
   # deny:
