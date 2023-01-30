@@ -45,7 +45,7 @@ fn main() {
             async_all: true,
             ..Default::default()
         })
-        .rust_protobuf_customize(protobuf_customized.clone())
+        .rust_protobuf_customize(protobuf_customized)
         .run()
         .expect("Gen async code failed.");
 

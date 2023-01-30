@@ -92,7 +92,7 @@ impl PipeListener {
                     continue;
                 }
                 Err(e) => {
-                    println!("Error connecting to pipe: {}", e);
+                    println!("Error connecting to pipe: {e}");
                     return Err(e);
                 }
             }

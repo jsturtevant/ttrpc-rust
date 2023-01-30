@@ -56,8 +56,8 @@ fn main() {
         );
 
         let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
-            Err(e) => format!("{:?}", e),
-            Ok(s) => format!("{:?}", s),
+            Err(e) => format!("{e:?}"),
+            Ok(s) => format!("{s:?}"),
         };
 
         println!(
@@ -73,8 +73,8 @@ fn main() {
         now.elapsed()
     );
     let show = match ac.online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new()) {
-        Err(e) => format!("{:?}", e),
-        Ok(s) => format!("{:?}", s),
+        Err(e) => format!("{e:?}"),
+        Ok(s) => format!("{s:?}"),
     };
     println!(
         "Main OS Thread - agent.online_cpu_mem() -> {} ended: {:?}",

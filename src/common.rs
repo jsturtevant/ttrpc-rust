@@ -44,7 +44,7 @@ fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
         return Ok((Domain::Vsock, addr));
     }
 
-    Err(Error::Others(format!("Scheme {:?} is not supported", addr)))
+    Err(Error::Others(format!("Scheme {addr:?} is not supported")))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -58,7 +58,7 @@ fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
         return Ok((Domain::Unix, addr));
     }
 
-    Err(Error::Others(format!("Scheme {:?} is not supported", addr)))
+    Err(Error::Others(format!("Scheme {addr:?} is not supported")))
 }
 
 #[cfg(any(
