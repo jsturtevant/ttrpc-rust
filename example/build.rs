@@ -10,7 +10,7 @@ use std::{
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() {
-    let protos = vec![
+    let mut protos = vec![
         "protocols/protos/github.com/gogo/protobuf/gogoproto/gogo.proto",
         "protocols/protos/github.com/kata-containers/agent/pkg/types/types.proto",
         "protocols/protos/agent.proto",
@@ -29,15 +29,13 @@ fn main() {
         .customize(Customize {
             ..Default::default()
         })
-        .rust_protobuf_customize(protobuf_customized)
+        .rust_protobuf_customize(protobuf_customized.clone())
         .run()
         .expect("Gen sync code failed.");
 
-    #[cfg(feature = "async")]
     // Only async support stream currently.
     protos.push("protocols/protos/streaming.proto");
 
-    #[cfg(feature = "async")]
     Codegen::new()
         .out_dir("protocols/asynchronous")
         .inputs(&protos)
@@ -61,7 +59,6 @@ fn main() {
     )
     .unwrap();
 
-    #[cfg(feature = "async")]
     replace_text_in_file(
         "protocols/asynchronous/oci.rs",
         "self: Box<Self>",
