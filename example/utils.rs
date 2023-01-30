@@ -11,7 +11,7 @@ pub fn remove_if_sock_exist(sock_addr: &str) -> Result<()> {
         .expect("socket address is not expected");
 
     if Path::new(path).exists() {
-        fs::remove_file(&path)?;
+        fs::remove_file(path)?;
     }
 
     Ok(())

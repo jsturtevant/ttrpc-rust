@@ -15,11 +15,11 @@
 mod protocols;
 mod utils;
 
+use log::LevelFilter;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use ttrpc::context::{self, Context};
 use ttrpc::Client;
-use log::LevelFilter;
 
 fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
@@ -36,15 +36,13 @@ fn main() {
     let t = thread::spawn(move || {
         let req = health::CheckRequest::new();
         println!(
-            "OS Thread {:?} - {} started: {:?}",
+            "OS Thread {:?} - health.check() started: {:?}",
             std::thread::current().id(),
-            "health.check()",
             now.elapsed(),
         );
         println!(
-            "OS Thread {:?} - {} -> {:?} ended: {:?}",
+            "OS Thread {:?} - health.check() -> {:?} ended: {:?}",
             std::thread::current().id(),
-            "health.check()",
             thc.check(default_ctx(), &req),
             now.elapsed(),
         );
@@ -52,9 +50,8 @@ fn main() {
 
     let t2 = thread::spawn(move || {
         println!(
-            "OS Thread {:?} - {} started: {:?}",
+            "OS Thread {:?} - agent.list_interfaces() started: {:?}",
             std::thread::current().id(),
-            "agent.list_interfaces()",
             now.elapsed(),
         );
 
@@ -64,17 +61,15 @@ fn main() {
         };
 
         println!(
-            "OS Thread {:?} - {} -> {} ended: {:?}",
+            "OS Thread {:?} - agent.list_interfaces() -> {} ended: {:?}",
             std::thread::current().id(),
-            "agent.list_interfaces()",
             show,
             now.elapsed(),
         );
     });
 
     println!(
-        "Main OS Thread - {} started: {:?}",
-        "agent.online_cpu_mem()",
+        "Main OS Thread - agent.online_cpu_mem() started: {:?}",
         now.elapsed()
     );
     let show = match ac.online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new()) {
@@ -82,8 +77,7 @@ fn main() {
         Ok(s) => format!("{:?}", s),
     };
     println!(
-        "Main OS Thread - {} -> {} ended: {:?}",
-        "agent.online_cpu_mem()",
+        "Main OS Thread - agent.online_cpu_mem() -> {} ended: {:?}",
         show,
         now.elapsed()
     );
@@ -91,13 +85,11 @@ fn main() {
     println!("\nsleep 2 seconds ...\n");
     thread::sleep(std::time::Duration::from_secs(2));
     println!(
-        "Main OS Thread - {} started: {:?}",
-        "health.version()",
+        "Main OS Thread - health.version() started: {:?}",
         now.elapsed()
     );
     println!(
-        "Main OS Thread - {} -> {:?} ended: {:?}",
-        "health.version()",
+        "Main OS Thread - health.version() -> {:?} ended: {:?}",
         hc.version(default_ctx(), &health::CheckRequest::new()),
         now.elapsed()
     );

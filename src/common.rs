@@ -1,5 +1,4 @@
 #![cfg(not(target_os = "windows"))]
-
 // Copyright (c) 2020 Ant Financial
 //
 // SPDX-License-Identifier: Apache-2.0
@@ -177,8 +176,6 @@ pub(crate) unsafe fn client_connect(sockaddr: &str) -> Result<RawFd> {
 
     Ok(fd)
 }
-
-
 
 #[cfg(test)]
 mod tests {

@@ -33,7 +33,7 @@ pub enum Error {
 
     #[cfg(target_os = "windows")]
     #[error("Windows error: {0}")]
-    Windows(i32), 
+    Windows(i32),
 
     #[error("ttrpc err: local stream closed")]
     LocalClosed,

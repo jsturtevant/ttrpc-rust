@@ -10,7 +10,7 @@ use std::{
 use ttrpc_codegen::{Codegen, Customize, ProtobufCustomize};
 
 fn main() {
-    let mut protos = vec![
+    let protos = vec![
         "protocols/protos/github.com/gogo/protobuf/gogoproto/gogo.proto",
         "protocols/protos/github.com/kata-containers/agent/pkg/types/types.proto",
         "protocols/protos/agent.proto",
@@ -29,7 +29,7 @@ fn main() {
         .customize(Customize {
             ..Default::default()
         })
-        .rust_protobuf_customize(protobuf_customized.clone())
+        .rust_protobuf_customize(protobuf_customized)
         .run()
         .expect("Gen sync code failed.");
 
@@ -78,7 +78,7 @@ fn replace_text_in_file(file_name: &str, from: &str, to: &str) -> Result<(), std
 
     let new_contents = contents.replace(from, to);
 
-    let mut dst = File::create(&file_name)?;
+    let mut dst = File::create(file_name)?;
     dst.write(new_contents.as_bytes())?;
 
     Ok(())

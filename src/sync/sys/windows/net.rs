@@ -23,7 +23,7 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{FromRawHandle, IntoRawHandle, RawHandle};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{io, thread};
+use std::{io};
 
 
 use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE};
@@ -112,7 +112,7 @@ impl PipeListener {
             poller: Mutex::new(poll),
             instance_number: instance_num,
         };
-        return Ok(Some(pipe_instance));
+        Ok(Some(pipe_instance))
     }
 
     fn new_instance(&self) -> io::Result<NamedPipe> {
@@ -146,7 +146,7 @@ impl PipeListener {
         if h == INVALID_HANDLE_VALUE {
             Err(io::Error::last_os_error())
         } else {
-            let mut pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
+            let pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
 
             Ok(pipe)
         }
@@ -210,7 +210,7 @@ impl PipeConnection {
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     continue;
                 }
-                Err(e) if e.raw_os_error() != None => {
+                Err(e) if e.raw_os_error().is_some() => {
                     return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
                 }
                 Err(e) => {
@@ -227,14 +227,14 @@ impl PipeConnection {
             // grabbing the lock write to read isn't ideal
             // the named pipe needs mutable access to read
             match self.named_pipe.lock().unwrap().write(buf) {
-                Ok(x) => return { Ok(x) },
+                Ok(x) => return Ok(x),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     continue;
                 }
                 Err(e) if e.raw_os_error() == Some(ERROR_NO_DATA as i32) => {
                     return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
                 }
-                Err(e) if e.raw_os_error() != None => {
+                Err(e) if e.raw_os_error().is_some() => {
                     return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
                 }
                 Err(e) => {
