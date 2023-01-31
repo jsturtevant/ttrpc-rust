@@ -315,7 +315,7 @@ impl ClientConnection {
 
     pub fn close(&self) -> Result<()> {
         match close(self.socket_pair.1) {
-            Ok(_) => Ok(()),
+            Ok(_) => {},
             Err(e) => return Err(crate::Error::Nix(e))
         };
 
