@@ -26,8 +26,7 @@ pub(crate) enum Domain {
 pub(crate) fn do_listen(listener: RawFd) -> Result<()> {
     if let Err(e) = fcntl(listener, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)) {
         return Err(Error::Others(format!(
-            "failed to set listener fd: {} as non block: {}",
-            listener, e
+            "failed to set listener fd: {listener} as non block: {e}"
         )));
     }
 
@@ -68,8 +67,7 @@ fn parse_sockaddr(addr: &str) -> Result<(Domain, &str)> {
 pub(crate) fn set_fd_close_exec(fd: RawFd) -> Result<RawFd> {
     if let Err(e) = fcntl(fd, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)) {
         return Err(Error::Others(format!(
-            "failed to set fd: {} as close-on-exec: {}",
-            fd, e
+            "failed to set fd: {fd} as close-on-exec: {e}"
         )));
     }
     Ok(fd)
@@ -126,8 +124,7 @@ fn make_socket(addr: (&str, u32)) -> Result<(RawFd, Domain, SockAddr)> {
             let sockaddr_port_v: Vec<&str> = sockaddrv.split(':').collect();
             if sockaddr_port_v.len() != 2 {
                 return Err(Error::Others(format!(
-                    "sockaddr {} is not right for vsock",
-                    sockaddr
+                    "sockaddr {sockaddr} is not right for vsock"
                 )));
             }
             let port: u32 = sockaddr_port_v[1]

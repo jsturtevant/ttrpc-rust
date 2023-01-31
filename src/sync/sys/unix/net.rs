@@ -178,7 +178,7 @@ impl PipeConnection {
     }
 
     pub(crate) fn id(&self) -> i32 {
-        self.fd as i32
+        self.fd
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
@@ -214,14 +214,14 @@ impl PipeConnection {
     pub fn close(&self) -> Result<()> {
         match close(self.fd) {
             Ok(_) => Ok(()),
-            Err(e) => Err(crate::Error::Nix(e))
+            Err(e) => return Err(crate::Error::Nix(e))
         }
     }
 
     pub fn shutdown(&self) -> Result<()> {
         match socket::shutdown(self.fd, Shutdown::Read) {
             Ok(_) => Ok(()),
-            Err(e) => Err(crate::Error::Nix(e))
+            Err(e) => return Err(crate::Error::Nix(e))
         }
     }
 }
@@ -251,7 +251,7 @@ impl ClientConnection {
 
 
         ClientConnection { 
-            fd:fd, 
+            fd, 
             socket_pair: (recver_fd, close_fd) 
         }
     }
@@ -309,19 +309,19 @@ impl ClientConnection {
     pub fn close_receiver(&self) -> Result<()> {
         match close(self.socket_pair.0) {
             Ok(_) => Ok(()),
-            Err(e) => Err(crate::Error::Nix(e))
+            Err(e) => return Err(crate::Error::Nix(e))
         }
     }
 
     pub fn close(&self) -> Result<()> {
         match close(self.socket_pair.1) {
             Ok(_) => Ok(()),
-            Err(e) => Err(crate::Error::Nix(e))
+            Err(e) => return Err(crate::Error::Nix(e))
         };
 
         match close(self.fd) {
             Ok(_) => Ok(()),
-            Err(e) => Err(crate::Error::Nix(e))
+            Err(e) => return Err(crate::Error::Nix(e))
         }
     }
         

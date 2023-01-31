@@ -19,7 +19,7 @@ fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
             client_succeeded = status.success();
         }
         Err(e) => {
-            println!("Error: {}", e);
+            println!("Error: {e}");
         }
     }
 
