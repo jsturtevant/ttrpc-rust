@@ -25,10 +25,6 @@ use crate::common::{self, client_connect, SOCK_CLOEXEC};
 #[cfg(target_os = "macos")] 
 use crate::common::set_fd_close_exec;
 use nix::sys::socket::{self};
-#[cfg(target_os = "macos")]
-use crate::common::set_fd_close_exec;
-
-
 
 pub struct PipeListener {
     fd: RawFd,
@@ -142,17 +138,17 @@ impl PipeListener {
         // use accept and call fcntl separately to set SOCK_CLOEXEC.
         // Because of this there is chance of the descriptor leak if fork + exec happens in between.
         #[cfg(target_os = "macos")] 
-        let fd = match accept(listener) {
+        let fd = match accept(self.fd) {
             Ok(fd) => {
                 if let Err(err) = set_fd_close_exec(fd) {
                     error!("fcntl failed after accept: {:?}", err);
-                    break;
+                    return Err(std::io::Error::from_raw_os_error(e as i32));
                 };
                 fd
             }
             Err(e) => {
                 error!("failed to accept error {:?}", e);
-                break;
+                return Err(std::io::Error::from_raw_os_error(e as i32));
             }
         };
 
