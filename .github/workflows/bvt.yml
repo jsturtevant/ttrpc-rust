@@ -6,7 +6,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -24,7 +24,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest]
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v3
+      - run: rustup component add clippy
+      - uses: tim-actions/clippy-check@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
+          name: checks-${{ matrix.os }}
+
+  # Windows doesn't have async enabled currently, so can't test all features        
+  clippy_windows_check:
+    name: Clippy Check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-2019, windows-2022]
     steps:
       - uses: actions/checkout@v3
       - run: rustup component add clippy
@@ -33,19 +49,19 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: checks-${{ matrix.os }}
 
-  # deny:
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       checks:
-  #         - advisories
-  #         - bans sources
+  deny:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - advisories
+          - bans sources
 
-  #   # Prevent sudden announcement of a new advisory from failing ci:
-  #   continue-on-error: ${{ matrix.checks == 'advisories' }}
+    # Prevent sudden announcement of a new advisory from failing ci:
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
 
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #     - uses: EmbarkStudios/cargo-deny-action@v1
-  #       with:
-  #         command: check ${{ matrix.checks }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check ${{ matrix.checks }}
