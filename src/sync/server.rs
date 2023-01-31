@@ -15,7 +15,7 @@
 //! Sync server of ttrpc.
 //! 
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 use protobuf::{CodedInputStream, Message};
@@ -296,7 +296,7 @@ impl Server {
         Ok(self)
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "windows"))]
     pub fn add_listener(mut self, fd: RawFd) -> Result<Server> {
         if !self.listeners.is_empty() {
             return Err(Error::Others(
@@ -548,14 +548,14 @@ impl Server {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 impl FromRawFd for Server {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         Self::default().add_listener(fd).unwrap()
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 impl AsRawFd for Server {
     fn as_raw_fd(&self) -> RawFd {
         self.listeners[0].as_raw_fd()

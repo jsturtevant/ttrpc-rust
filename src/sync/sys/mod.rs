@@ -1,6 +1,6 @@
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 mod linux;
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 pub use crate::sync::sys::linux::{PipeConnection, PipeListener, ClientConnection};
 
 #[cfg(target_os = "windows")]

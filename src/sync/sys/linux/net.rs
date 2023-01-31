@@ -22,7 +22,7 @@ use nix::unistd::*;
 use std::sync::{Arc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::common::{self, client_connect, SOCK_CLOEXEC};
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")] 
 use crate::common::set_fd_close_exec;
 use nix::sys::socket::{self};
 #[cfg(target_os = "macos")]
@@ -68,7 +68,7 @@ impl PipeListener {
         let fds = pipe2(nix::fcntl::OFlag::O_CLOEXEC)?;
  
         
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")] 
         let fds = {
             let (rfd, wfd) = pipe()?;
             set_fd_close_exec(rfd)?;
@@ -141,7 +141,7 @@ impl PipeListener {
         // Non Linux platforms do not support accept4 with SOCK_CLOEXEC flag, so instead
         // use accept and call fcntl separately to set SOCK_CLOEXEC.
         // Because of this there is chance of the descriptor leak if fork + exec happens in between.
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")] 
         let fd = match accept(listener) {
             Ok(fd) => {
                 if let Err(err) = set_fd_close_exec(fd) {

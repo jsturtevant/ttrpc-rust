@@ -14,19 +14,19 @@
 
 //! Sync client of ttrpc.
 
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::io::RawFd;
 
 use std::collections::HashMap;
-#[cfg(target_os = "linux")]
-use std::os::unix::io::RawFd;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{thread};
+use std::time::Duration;
 
 use crate::error::{Error, Result};
 use crate::sync::sys::{ClientConnection};
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
-use std::time::Duration;
 
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
@@ -46,7 +46,7 @@ impl Client {
         Ok(Self::new_client(conn))
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "windows"))]
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
         let conn = ClientConnection::new(fd);

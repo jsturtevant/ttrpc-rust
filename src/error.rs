@@ -27,7 +27,7 @@ pub enum Error {
     #[error("rpc status: {0:?}")]
     RpcStatus(Status),
 
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "windows"))]
     #[error("Nix error: {0}")]
     Nix(#[from] nix::Error),
 
