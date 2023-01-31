@@ -20,6 +20,8 @@ use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use ttrpc::context::{self, Context};
 use ttrpc::Client;
+use ttrpc::proto::Code;
+use ttrpc::error::Error;
 
 fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
@@ -40,10 +42,24 @@ fn main() {
             std::thread::current().id(),
             now.elapsed(),
         );
+
+        let rsp = thc.check(default_ctx(), &req);
+        match rsp.as_ref() {
+            Err(Error::RpcStatus(s)) => {
+                assert_eq!(Code::NOT_FOUND, s.code());
+                assert_eq!("Just for fun".to_string(), s.message())
+            },
+            Err(_) => {
+                assert!(false)
+            },
+            Ok(_) => {
+                assert!(false)
+            },
+        } 
         println!(
             "OS Thread {:?} - health.check() -> {:?} ended: {:?}",
             std::thread::current().id(),
-            thc.check(default_ctx(), &req),
+            rsp,
             now.elapsed(),
         );
     });
@@ -55,9 +71,16 @@ fn main() {
             now.elapsed(),
         );
 
-        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
-            Err(e) => format!("{e:?}"),
-            Ok(s) => format!("{s:?}"),
+        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new())  {
+            Err(e) => {
+                assert!(false);
+                format!("{e:?}")
+            },
+            Ok(s) => {
+                assert_eq!("first".to_string(), s.Interfaces[0].name);
+                assert_eq!("second".to_string(), s.Interfaces[1].name);
+                format!("{s:?}")
+            },
         };
 
         println!(
@@ -73,8 +96,19 @@ fn main() {
         now.elapsed()
     );
     let show = match ac.online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new()) {
-        Err(e) => format!("{e:?}"),
-        Ok(s) => format!("{s:?}"),
+        Err(Error::RpcStatus(s)) => {
+            assert_eq!(Code::NOT_FOUND, s.code());
+            assert_eq!("/grpc.AgentService/OnlineCPUMem is not supported".to_string(), s.message());
+            format!("{s:?}")
+        },
+        Err(e) => {
+            assert!(false);
+            format!("{e:?}")
+        },
+        Ok(s) => {
+            assert!(false);
+            format!("{s:?}")
+        },
     };
     println!(
         "Main OS Thread - agent.online_cpu_mem() -> {} ended: {:?}",
@@ -84,13 +118,17 @@ fn main() {
 
     println!("\nsleep 2 seconds ...\n");
     thread::sleep(std::time::Duration::from_secs(2));
+
+    let version = hc.version(default_ctx(), &health::CheckRequest::new());
+    assert_eq!("mock.0.1", version.as_ref().unwrap().agent_version.as_str());
+    assert_eq!("0.0.1", version.as_ref().unwrap().grpc_version.as_str());
     println!(
         "Main OS Thread - health.version() started: {:?}",
         now.elapsed()
     );
     println!(
         "Main OS Thread - health.version() -> {:?} ended: {:?}",
-        hc.version(default_ctx(), &health::CheckRequest::new()),
+        version,
         now.elapsed()
     );
 
