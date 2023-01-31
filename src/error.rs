@@ -27,11 +27,11 @@ pub enum Error {
     #[error("rpc status: {0:?}")]
     RpcStatus(Status),
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
     #[error("Nix error: {0}")]
     Nix(#[from] nix::Error),
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     #[error("Windows error: {0}")]
     Windows(i32),
 

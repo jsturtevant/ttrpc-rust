@@ -19,9 +19,9 @@ use log::LevelFilter;
 use protocols::sync::{agent, agent_ttrpc, health, health_ttrpc};
 use std::thread;
 use ttrpc::context::{self, Context};
-use ttrpc::Client;
-use ttrpc::proto::Code;
 use ttrpc::error::Error;
+use ttrpc::proto::Code;
+use ttrpc::Client;
 
 fn main() {
     simple_logging::log_to_stderr(LevelFilter::Trace);
@@ -48,14 +48,14 @@ fn main() {
             Err(Error::RpcStatus(s)) => {
                 assert_eq!(Code::NOT_FOUND, s.code());
                 assert_eq!("Just for fun".to_string(), s.message())
-            },
+            }
             Err(_) => {
                 assert!(false)
-            },
+            }
             Ok(_) => {
                 assert!(false)
-            },
-        } 
+            }
+        }
         println!(
             "OS Thread {:?} - health.check() -> {:?} ended: {:?}",
             std::thread::current().id(),
@@ -71,16 +71,16 @@ fn main() {
             now.elapsed(),
         );
 
-        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new())  {
+        let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
             Err(e) => {
                 assert!(false);
                 format!("{e:?}")
-            },
+            }
             Ok(s) => {
                 assert_eq!("first".to_string(), s.Interfaces[0].name);
                 assert_eq!("second".to_string(), s.Interfaces[1].name);
                 format!("{s:?}")
-            },
+            }
         };
 
         println!(
@@ -98,17 +98,20 @@ fn main() {
     let show = match ac.online_cpu_mem(default_ctx(), &agent::OnlineCPUMemRequest::new()) {
         Err(Error::RpcStatus(s)) => {
             assert_eq!(Code::NOT_FOUND, s.code());
-            assert_eq!("/grpc.AgentService/OnlineCPUMem is not supported".to_string(), s.message());
+            assert_eq!(
+                "/grpc.AgentService/OnlineCPUMem is not supported".to_string(),
+                s.message()
+            );
             format!("{s:?}")
-        },
+        }
         Err(e) => {
             assert!(false);
             format!("{e:?}")
-        },
+        }
         Ok(s) => {
             assert!(false);
             format!("{s:?}")
-        },
+        }
     };
     println!(
         "Main OS Thread - agent.online_cpu_mem() -> {} ended: {:?}",

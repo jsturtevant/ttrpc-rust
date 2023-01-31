@@ -1,4 +1,4 @@
-#![cfg(not(target_os = "windows"))]
+#![cfg(not(windows))]
 // Copyright (c) 2020 Ant Financial
 //
 // SPDX-License-Identifier: Apache-2.0

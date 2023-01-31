@@ -1,6 +1,6 @@
-use std::{process::Command, time::Duration}; 
-use assert_cmd::prelude::*; 
+use assert_cmd::prelude::*;
 use std::io::{stderr, stdout, Write};
+use std::{process::Command, time::Duration};
 
 #[test]
 fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {

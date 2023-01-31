@@ -14,7 +14,7 @@
 
 //! Sync client of ttrpc.
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
 use std::os::unix::io::RawFd;
 
 use std::collections::HashMap;
@@ -46,7 +46,7 @@ impl Client {
         Ok(Self::new_client(conn))
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(unix)]
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
         let conn = ClientConnection::new(fd);
