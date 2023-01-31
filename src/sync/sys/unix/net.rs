@@ -214,14 +214,14 @@ impl PipeConnection {
     pub fn close(&self) -> Result<()> {
         match close(self.fd) {
             Ok(_) => Ok(()),
-            Err(e) => return Err(crate::Error::Nix(e))
+            Err(e) => Err(crate::Error::Nix(e))
         }
     }
 
     pub fn shutdown(&self) -> Result<()> {
         match socket::shutdown(self.fd, Shutdown::Read) {
             Ok(_) => Ok(()),
-            Err(e) => return Err(crate::Error::Nix(e))
+            Err(e) => Err(crate::Error::Nix(e))
         }
     }
 }
@@ -309,7 +309,7 @@ impl ClientConnection {
     pub fn close_receiver(&self) -> Result<()> {
         match close(self.socket_pair.0) {
             Ok(_) => Ok(()),
-            Err(e) => return Err(crate::Error::Nix(e))
+            Err(e) => Err(crate::Error::Nix(e))
         }
     }
 
@@ -321,7 +321,7 @@ impl ClientConnection {
 
         match close(self.fd) {
             Ok(_) => Ok(()),
-            Err(e) => return Err(crate::Error::Nix(e))
+            Err(e) => Err(crate::Error::Nix(e))
         }
     }
         
