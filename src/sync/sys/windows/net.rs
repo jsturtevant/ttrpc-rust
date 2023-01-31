@@ -256,15 +256,19 @@ impl PipeConnection {
     }
 }
 
-pub struct ClientConnection {}
+pub struct ClientConnection {
+    address: String
+}
 
 impl ClientConnection {
-    pub fn client_connect(_sockaddr: &str) -> Result<ClientConnection> {
-        Ok(ClientConnection::new())
+    pub fn client_connect(sockaddr: &str) -> Result<ClientConnection> {
+        Ok(ClientConnection::new(sockaddr))
     }
 
-    pub(crate) fn new() -> ClientConnection {
-        ClientConnection {}
+    pub(crate) fn new(sockaddr: &str) -> ClientConnection {
+        ClientConnection {
+            address: sockaddr.to_string()
+        }
     }
 
     pub fn ready(&self) -> std::result::Result<Option<()>, io::Error> {
@@ -276,7 +280,7 @@ impl ClientConnection {
         opts.read(true)
             .write(true)
             .custom_flags(FILE_FLAG_OVERLAPPED);
-        let file = opts.open(r"\\.\pipe\mio-named-pipe-test");
+        let file = opts.open(self.address.as_str());
 
         PipeConnection::new(file.unwrap().into_raw_handle())
     }

@@ -56,7 +56,7 @@ sync = []
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-[workspace]
-members = [
-    "example"
-]
+# [workspace]
+# members = [
+#     "example"
+# ]
