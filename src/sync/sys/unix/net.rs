@@ -142,7 +142,7 @@ impl PipeListener {
             Ok(fd) => {
                 if let Err(err) = set_fd_close_exec(fd) {
                     error!("fcntl failed after accept: {:?}", err);
-                    return Err(std::io::Error::from_raw_os_error(e as i32));
+                    return Err(err);
                 };
                 fd
             }
