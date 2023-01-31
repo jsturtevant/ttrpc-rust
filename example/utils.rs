@@ -7,7 +7,7 @@ use std::path::Path;
 pub const SOCK_ADDR: &str = r"unix:///tmp/ttrpc-test";
 
 #[cfg(windows)]
-pub const SOCK_ADDR: &str = r"\\.\pipe\mio-named-pipe-test";
+pub const SOCK_ADDR: &str = r"\\.\pipe\ttrpc-test";
 
 #[cfg(unix)]
 pub fn remove_if_sock_exist(sock_addr: &str) -> Result<()> {
