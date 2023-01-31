@@ -12,7 +12,7 @@ fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
     let mut server = cmd.spawn()?;
     std::thread::sleep(Duration::from_secs(2));
 
-    let mut client = Command::cargo_bin("examples/client").unwrap().spawn();
+    let client = Command::cargo_bin("examples/client").unwrap().spawn();
     let mut client_succeeded = false;
     match client.unwrap().wait() {
         Ok(status) => {

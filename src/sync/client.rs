@@ -49,7 +49,7 @@ impl Client {
     #[cfg(target_os = "linux")]
     /// Initialize a new [`Client`] from raw file descriptor.
     pub fn new(fd: RawFd) -> Client {
-        let conn = ClientConnection::new();
+        let conn = ClientConnection::new(fd);
 
         Self::new_client(conn)
     }
