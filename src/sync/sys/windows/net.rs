@@ -21,19 +21,19 @@ use std::fs::OpenOptions;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{FromRawHandle, IntoRawHandle, RawHandle};
+use std::os::windows::prelude::AsRawHandle;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io};
 
 
-use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE, CloseHandle, GetLastError};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
 };
 use windows_sys::Win32::System::Pipes::{
     CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
 };
-
 use mio::{Events, Interest, Poll, Token};
 use std::io::{Read, Write};
 
@@ -176,7 +176,6 @@ impl PipeConnection {
             .register(&mut pipe, CLIENT, Interest::WRITABLE | Interest::READABLE)
             .unwrap();
 
-
         PipeConnection {
             named_pipe: Mutex::new(pipe),
             poller: Mutex::new(poll),
@@ -246,12 +245,19 @@ impl PipeConnection {
     }
 
     pub fn close(&self) -> Result<()> {
-        //todo
-        Ok(())
+        let h = self.named_pipe.lock().unwrap().as_raw_handle();
+        let result = unsafe { CloseHandle(h as isize) };
+        
+
+        let os_err = unsafe {  GetLastError() as i32 };
+        match result {
+            0 => Err(crate::Error::Windows(os_err)),
+            _ => Ok(())
+        }
     }
 
     pub fn shutdown(&self) -> Result<()> {
-        //todo
+        // windows doesn't really have the equivalent
         Ok(())
     }
 }
@@ -286,12 +292,12 @@ impl ClientConnection {
     }
 
     pub fn close_receiver(&self) -> Result<()> {
-        //todo
+        // only close from the connection object in windows
         Ok(())
     }
 
     pub fn close(&self) -> Result<()> {
-        //todo
+        // only close from the connection object in windows
         Ok(())
     }
 }
