@@ -24,7 +24,7 @@ pub fn remove_if_sock_exist(sock_addr: &str) -> Result<()> {
 
 #[cfg(windows)]
 pub fn remove_if_sock_exist(sock_addr: &str) -> Result<()> {
-    //todo close file handle
+    //todo force close file handle?
 
     Ok(())
 }
