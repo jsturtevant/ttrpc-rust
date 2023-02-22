@@ -257,8 +257,10 @@ impl PipeConnection {
     }
 
     pub fn shutdown(&self) -> Result<()> {
-        // windows doesn't really have the equivalent
-        Ok(())
+        match self.named_pipe.lock().unwrap().disconnect() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(crate::Error::Others(e.to_string()))
+        }
     }
 }
 
