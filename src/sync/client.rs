@@ -34,7 +34,7 @@ type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 /// A ttrpc Client (sync).
 #[derive(Clone)]
 pub struct Client {
-    _fd: Arc<ClientConnection>,
+    _connection: Arc<ClientConnection>,
     sender_tx: Sender,
 }
 
@@ -60,13 +60,12 @@ impl Client {
         let (sender_tx, rx): (Sender, Receiver) = mpsc::channel();
         let recver_map_orig = Arc::new(Mutex::new(HashMap::new()));
 
-        //Sender
-        let recver_map = recver_map_orig.clone();
-
+       
+        let receiver_map = recver_map_orig.clone();
         let connection = Arc::new(client.get_pipe_connection());
+        let sender_client = connection.clone();
 
-        let recieve_client = connection.clone();
-
+        //Sender
         thread::spawn(move || {
             let mut stream_id: u32 = 1;
             for (buf, recver_tx) in rx.iter() {
@@ -74,16 +73,16 @@ impl Client {
                 stream_id += 2;
                 //Put current_stream_id and recver_tx to recver_map
                 {
-                    let mut map = recver_map.lock().unwrap();
+                    let mut map = receiver_map.lock().unwrap();
                     map.insert(current_stream_id, recver_tx.clone());
                 }
                 let mut mh = MessageHeader::new_request(0, buf.len() as u32);
                 mh.set_stream_id(current_stream_id);
 
-                if let Err(e) = write_message(&recieve_client, mh, buf) {
+                if let Err(e) = write_message(&sender_client, mh, buf) {
                     //Remove current_stream_id and recver_tx to recver_map
                     {
-                        let mut map = recver_map.lock().unwrap();
+                        let mut map = receiver_map.lock().unwrap();
                         map.remove(&current_stream_id);
                     }
                     recver_tx
@@ -95,14 +94,11 @@ impl Client {
         });
 
         //Recver
-        let reciever_connection = connection;
-        let reciever_client = client.clone();
+        let receiver_connection = connection;
+        let receiver_client = client.clone();
         thread::spawn(move || {
-          
-
             loop {
-                
-                match reciever_client.ready() {
+                match receiver_client.ready() {
                     Ok(None) => {
                         continue;
                     }
@@ -112,10 +108,10 @@ impl Client {
                         break;
                     }
                 }
+
                 let mh;
                 let buf;
-
-                match read_message(&reciever_connection) {
+                match read_message(&receiver_connection) {
                     Ok((x, y)) => {
                         mh = x;
                         buf = y;
@@ -164,7 +160,7 @@ impl Client {
                 map.remove(&mh.stream_id);
             }
 
-            let _ = reciever_client.close_receiver().map_err(|e| {
+            let _ = receiver_client.close_receiver().map_err(|e| {
                 warn!(
                     "failed to close with error: {:?}", e
                 )
@@ -174,7 +170,7 @@ impl Client {
         });
 
         Client {
-            _fd: client,
+            _connection: client,
             sender_tx,
         }
     }
@@ -214,6 +210,6 @@ impl Client {
 impl Drop for ClientConnection {
     fn drop(&mut self) {
         self.close().unwrap();
-        trace!("All client is dropped");
+        trace!("Client is dropped");
     }
 }

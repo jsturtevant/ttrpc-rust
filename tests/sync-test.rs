@@ -1,4 +1,3 @@
-//use std::io::{stderr, stdout, Write};
 use std::{process::Command, time::Duration};
 
 #[test]

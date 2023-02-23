@@ -1,16 +1,18 @@
-// Copyright (c) 2019 Ant Financial
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+	Copyright The containerd Authors.
+
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
+
+		http://www.apache.org/licenses/LICENSE-2.0
+
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
+*/
 
 use crate::error::Result;
 
@@ -87,12 +89,11 @@ impl PipeListener {
                     break;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    println!("waiting for client to connect");
+                    info!("waiting for client to connect");
                     poll.poll(&mut events, None).unwrap();
                     continue;
                 }
                 Err(e) => {
-                    println!("Error connecting to pipe: {e}");
                     return Err(e);
                 }
             }
@@ -122,34 +123,22 @@ impl PipeListener {
             .collect::<Vec<_>>();
 
         // bitwise or file_flag_first_pipe_instance with file_flag_overlapped and pipe_access_duplex
-        let mut openmode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
+        let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
 
         if self.first_instance.load(Ordering::SeqCst) {
-            openmode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
+            open_mode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
             self.first_instance.swap(false, Ordering::SeqCst);
         }
 
-        // Safety: syscall
-        let h = unsafe {
-            CreateNamedPipeW(
-                name.as_ptr(),
-                openmode,
-                PIPE_TYPE_BYTE,
-                PIPE_UNLIMITED_INSTANCES,
-                65536,
-                65536,
-                0,
-                std::ptr::null_mut(), // todo set this on first instance
-            )
+        let h = match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, std::ptr::null_mut())} {
+            INVALID_HANDLE_VALUE => {
+                return Err(io::Error::last_os_error());
+            }
+            h => {
+                let pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
+                Ok(pipe)
+            },
         };
-
-        if h == INVALID_HANDLE_VALUE {
-            Err(io::Error::last_os_error())
-        } else {
-            let pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
-
-            Ok(pipe)
-        }
     }
 
     pub fn close(&self) -> Result<()> {
@@ -203,7 +192,6 @@ impl PipeConnection {
                     return Err(crate::Error::LocalClosed);
                 }
                 Ok(x) => {
-                    //print!("read: {:?}", std::str::from_utf8(&buf));
                     return Ok(x);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -247,11 +235,8 @@ impl PipeConnection {
     pub fn close(&self) -> Result<()> {
         let h = self.named_pipe.lock().unwrap().as_raw_handle();
         let result = unsafe { CloseHandle(h as isize) };
-        
-
-        let os_err = unsafe {  GetLastError() as i32 };
         match result {
-            0 => Err(crate::Error::Windows(os_err)),
+            0 => Err(crate::Error::Windows(io::Error::last_os_error())),
             _ => Ok(())
         }
     }

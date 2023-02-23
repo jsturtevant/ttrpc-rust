@@ -72,8 +72,6 @@ macro_rules! request_handler {
 #[macro_export]
 macro_rules! client_request {
     ($self: ident, $ctx: ident, $req: ident, $server: expr, $method: expr, $cres: ident) => {
-        println!("writing message");
-
         let mut creq = ::ttrpc::Request::new();
         creq.set_service($server.to_string());
         creq.set_method($method.to_string());
