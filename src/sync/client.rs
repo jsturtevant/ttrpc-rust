@@ -144,14 +144,14 @@ impl Client {
                 let recver_tx = match map.get(&mh.stream_id) {
                     Some(tx) => tx,
                     None => {
-                        debug!("Recver got unknown packet {:?} {:?}", mh, buf);
+                        debug!("Receiver got unknown packet {:?} {:?}", mh, buf);
                         continue;
                     }
                 };
                 if mh.type_ != MESSAGE_TYPE_RESPONSE {
                     recver_tx
                         .send(Err(Error::Others(format!(
-                            "Recver got malformed packet {mh:?} {buf:?}"
+                            "Receiver got malformed packet {mh:?} {buf:?}"
                         ))))
                         .unwrap_or_else(|_e| error!("The request has returned"));
                     continue;
@@ -170,7 +170,7 @@ impl Client {
                 )
             });
 
-            trace!("Recver quit");
+            trace!("Receiver quit");
         });
 
         Client {
@@ -189,12 +189,12 @@ impl Client {
 
         let result = if req.timeout_nano == 0 {
             rx.recv()
-                .map_err(err_to_others_err!(e, "Receive packet from recver error: "))?
+                .map_err(err_to_others_err!(e, "Receive packet from Receiver error: "))?
         } else {
             rx.recv_timeout(Duration::from_nanos(req.timeout_nano as u64))
                 .map_err(err_to_others_err!(
                     e,
-                    "Receive packet from recver timeout: "
+                    "Receive packet from Receiver timeout: "
                 ))?
         };
 
