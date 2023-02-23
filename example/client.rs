@@ -49,11 +49,11 @@ fn main() {
                 assert_eq!(Code::NOT_FOUND, s.code());
                 assert_eq!("Just for fun".to_string(), s.message())
             }
-            Err(_) => {
-                assert!(false)
+            Err(e) => {
+                panic!("{:?}", e)
             }
-            Ok(_) => {
-                assert!(false)
+            Ok(x) => {
+                panic!("{:?}", x)
             }
         }
         println!(
@@ -73,8 +73,7 @@ fn main() {
 
         let show = match tac.list_interfaces(default_ctx(), &agent::ListInterfacesRequest::new()) {
             Err(e) => {
-                assert!(false);
-                format!("{e:?}")
+                panic!("{:?}", e)
             }
             Ok(s) => {
                 assert_eq!("first".to_string(), s.Interfaces[0].name);
@@ -105,12 +104,10 @@ fn main() {
             format!("{s:?}")
         }
         Err(e) => {
-            assert!(false);
-            format!("{e:?}")
+            panic!("{:?}", e)
         }
         Ok(s) => {
-            assert!(false);
-            format!("{s:?}")
+            panic!("{:?}", s)
         }
     };
     println!(
