@@ -15,6 +15,7 @@
 */
 
 use crate::error::Result;
+use crate::error::Error;
 
 use mio::windows::NamedPipe;
 
@@ -29,7 +30,7 @@ use std::sync::{Arc, Mutex};
 use std::{io};
 
 
-use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE, CloseHandle, GetLastError};
+use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE, CloseHandle};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
 };
@@ -130,13 +131,13 @@ impl PipeListener {
             self.first_instance.swap(false, Ordering::SeqCst);
         }
 
-        let h = match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, std::ptr::null_mut())} {
+        match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, std::ptr::null_mut())} {
             INVALID_HANDLE_VALUE => {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error())
             }
             h => {
                 let pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
-                Ok(pipe)
+                return Ok(pipe)
             },
         };
     }
@@ -151,9 +152,6 @@ pub struct PipeConnection {
     instance_number: i32,
     poller: Mutex<Poll>,
 }
-
-unsafe impl Send for PipeConnection {}
-unsafe impl Sync for PipeConnection {}
 
 impl PipeConnection {
     pub(crate) fn new(h: RawHandle) -> PipeConnection {
@@ -219,14 +217,14 @@ impl PipeConnection {
                     continue;
                 }
                 Err(e) if e.raw_os_error() == Some(ERROR_NO_DATA as i32) => {
-                    return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
+                    return Err(Error::Windows(e.raw_os_error().unwrap()))
                 }
                 Err(e) if e.raw_os_error().is_some() => {
-                    return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
+                    return Err(Error::Windows(e.raw_os_error().unwrap()))
                 }
                 Err(e) => {
                     trace!("Error writing to pipe: {}", e);
-                    return Err(crate::Error::Others(e.to_string()));
+                    return Err(Error::Others(e.to_string()));
                 }
             }
         }
@@ -236,7 +234,7 @@ impl PipeConnection {
         let h = self.named_pipe.lock().unwrap().as_raw_handle();
         let result = unsafe { CloseHandle(h as isize) };
         match result {
-            0 => Err(crate::Error::Windows(io::Error::last_os_error())),
+            0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
             _ => Ok(())
         }
     }
@@ -244,7 +242,7 @@ impl PipeConnection {
     pub fn shutdown(&self) -> Result<()> {
         match self.named_pipe.lock().unwrap().disconnect() {
             Ok(_) => Ok(()),
-            Err(e) => Err(crate::Error::Others(e.to_string()))
+            Err(e) => Err(Error::Others(e.to_string()))
         }
     }
 }
