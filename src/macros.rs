@@ -18,7 +18,7 @@ macro_rules! cfg_sync {
 macro_rules! cfg_async {
     ($($item:item)*) => {
         $(
-            #[cfg(feature = "async")]
+            #[cfg(all(feature = "async", target_os="linux"))]
             #[cfg_attr(docsrs, doc(cfg(feature = "async")))]
             $item
         )*

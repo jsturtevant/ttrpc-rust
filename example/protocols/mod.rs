@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-#[cfg(feature = "async")]
+#[cfg(unix)]
 pub mod asynchronous;
-#[cfg(feature = "async")]
+#[cfg(unix)]
 pub use asynchronous as r#async;
 pub mod sync;
