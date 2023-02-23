@@ -42,6 +42,7 @@ use std::io::{Read, Write};
 
 const SERVER: Token = Token(0);
 const CLIENT: Token = Token(1);
+const PIPE_BUFFER_SIZE:u32 = 65536;
 
 pub struct PipeListener {
     first_instance: AtomicBool,
@@ -131,7 +132,7 @@ impl PipeListener {
             self.first_instance.swap(false, Ordering::SeqCst);
         }
 
-        match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, std::ptr::null_mut())} {
+        match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_BUFFER_SIZE, PIPE_BUFFER_SIZE, 0, std::ptr::null_mut())} {
             INVALID_HANDLE_VALUE => {
                 return Err(io::Error::last_os_error())
             }
