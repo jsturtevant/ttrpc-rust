@@ -28,7 +28,6 @@ else
 	cargo test --all-features --verbose
 endif
 	
-
 .PHONY: check
 check:
 	cargo fmt --all -- --check
