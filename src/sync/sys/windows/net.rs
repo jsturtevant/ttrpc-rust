@@ -16,38 +16,65 @@
 
 use crate::error::Result;
 use crate::error::Error;
-
-use mio::windows::NamedPipe;
-
+use std::cell::UnsafeCell;
 use std::ffi::OsStr;
 use std::fs::OpenOptions;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::{FromRawHandle, IntoRawHandle, RawHandle};
-use std::os::windows::prelude::AsRawHandle;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::os::windows::io::{IntoRawHandle};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc};
 use std::{io};
 
+use windows_sys::Win32::Foundation::{ CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE };
+use windows_sys::Win32::Storage::FileSystem::{ ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX };
+use windows_sys::Win32::System::IO::{ GetOverlappedResult, OVERLAPPED };
+use windows_sys::Win32::System::Pipes::{ CreateNamedPipeW, ConnectNamedPipe,DisconnectNamedPipe, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES };
+use windows_sys::Win32::System::Threading::CreateEventW;
 
-use windows_sys::Win32::Foundation::{ERROR_NO_DATA, INVALID_HANDLE_VALUE, CloseHandle};
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
-};
-use windows_sys::Win32::System::Pipes::{
-    CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
-};
-use mio::{Events, Interest, Poll, Token};
-use std::io::{Read, Write};
-
-const SERVER: Token = Token(0);
-const CLIENT: Token = Token(1);
 const PIPE_BUFFER_SIZE:u32 = 65536;
+const WAIT_FOR_EVENT: i32 = 1;
+
+struct NamedPipe(isize);
 
 pub struct PipeListener {
     first_instance: AtomicBool,
     address: String,
-    instance_number: AtomicI32,
+}
+
+#[repr(C)]
+struct Overlapped {
+    inner: UnsafeCell<OVERLAPPED>,
+}
+
+impl Overlapped {
+    fn new_with_event(i: i32) -> (Overlapped, isize)  {
+       // create and event to wait on 
+        // https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult#remarks
+        // "It is safer to use an event object because of the confusion that can occur when multiple simultaneous overlapped operations are performed on the same file, named pipe, or communications device." 
+        // "In this situation, there is no way to know which operation caused the object's state to be signaled."
+        trace!("Creating event for overlapped IO (id: {}, thread: {:?})", i, std::thread::current().id());
+        let name = OsStr::new(format!("id-{}-{:?}", i,std::thread::current().id()).as_str())
+        .encode_wide()
+        .chain(Some(0)) // add NULL termination
+        .collect::<Vec<_>>();
+        let event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, name.as_ptr()) };
+        let mut ol = Overlapped {
+            inner: UnsafeCell::new(unsafe { std::mem::zeroed() }),
+        };
+        ol.inner.get_mut().hEvent = event;
+        (ol, event)
+    }
+
+    fn new() -> Overlapped  {
+         Overlapped {
+             inner: UnsafeCell::new(unsafe { std::mem::zeroed() }),
+         }
+     }
+
+    fn as_mut_ptr(&self) -> *mut OVERLAPPED {
+        self.inner.get()
+    }
 }
 
 impl PipeListener {
@@ -55,14 +82,10 @@ impl PipeListener {
         Ok(PipeListener {
             first_instance: AtomicBool::new(true),
             address: sockaddr.to_string(),
-            instance_number: AtomicI32::new(1),
         })
     }
 
-    pub(crate) fn accept(
-        &self,
-        quit_flag: &Arc<AtomicBool>,
-    ) -> std::result::Result<Option<PipeConnection>, io::Error> {
+    pub(crate) fn accept(&self, quit_flag: &Arc<AtomicBool>) -> std::result::Result<Option<PipeConnection>, io::Error> {
         if quit_flag.load(Ordering::SeqCst) {
             info!("listener shutdown for quit flag");
             return Err(io::Error::new(
@@ -72,50 +95,38 @@ impl PipeListener {
         }
 
         // Create a new pipe for every new client
-        let mut namedpipe = self.new_instance().unwrap();
+        let np = self.new_instance().unwrap();
+        let ol= Overlapped::new();
 
-        let mut poll = Poll::new().unwrap();
-        let mut events = Events::with_capacity(1024);
-        poll.registry()
-            .register(
-                &mut namedpipe,
-                SERVER,
-                Interest::WRITABLE,
-            )
-            .unwrap();
-
-        loop {
-            match namedpipe.connect() {
-                Ok(()) => {
-                    // pipe is locked so can't use it here.
-                    break;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    info!("waiting for client to connect");
-                    poll.poll(&mut events, None).unwrap();
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            }
+        trace!("listening for connection");
+        let result = unsafe { ConnectNamedPipe(np.0, ol.as_mut_ptr())};
+        if result != 0 {
+            return Err(io::Error::last_os_error());
         }
 
-        poll.registry()
-            .reregister(
-                &mut namedpipe,
-                SERVER,
-                Interest::READABLE,
-            )
-            .unwrap();
-        let instance_num = self.instance_number.fetch_add(1, Ordering::SeqCst);
-        trace!("pipe instance {} connected", instance_num);
-        let pipe_instance = PipeConnection {
-            named_pipe: Mutex::new(namedpipe),
-            poller: Mutex::new(poll),
-            instance_number: instance_num,
-        };
-        Ok(Some(pipe_instance))
+        match io::Error::last_os_error() {
+            ref e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
+                let mut bytes_transfered = 0;
+                let res = unsafe {GetOverlappedResult(np.0, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
+                match res {
+                    0 => {
+                        return Err(io::Error::last_os_error());
+                    }
+                    _ => {
+                        Ok(Some(PipeConnection{named_pipe: np}))
+                    }
+                }
+            }
+            ref e if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {
+                Ok(Some(PipeConnection{named_pipe: np}))
+            }
+            ref e => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to connect pipe: {:?}", e),
+                ));
+            }
+        }
     }
 
     fn new_instance(&self) -> io::Result<NamedPipe> {
@@ -125,20 +136,19 @@ impl PipeListener {
             .collect::<Vec<_>>();
 
         // bitwise or file_flag_first_pipe_instance with file_flag_overlapped and pipe_access_duplex
-        let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
+        let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED ;
 
         if self.first_instance.load(Ordering::SeqCst) {
             open_mode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
             self.first_instance.swap(false, Ordering::SeqCst);
         }
 
-        match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_BUFFER_SIZE, PIPE_BUFFER_SIZE, 0, std::ptr::null_mut())} {
+        match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, PIPE_BUFFER_SIZE, PIPE_BUFFER_SIZE, 0, std::ptr::null_mut())} {
             INVALID_HANDLE_VALUE => {
                 return Err(io::Error::last_os_error())
             }
             h => {
-                let pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
-                return Ok(pipe)
+                return Ok(NamedPipe(h))
             },
         };
     }
@@ -149,107 +159,111 @@ impl PipeListener {
 }
 
 pub struct PipeConnection {
-    named_pipe: Mutex<NamedPipe>,
-    instance_number: i32,
-    poller: Mutex<Poll>,
+    named_pipe: NamedPipe,
 }
 
 impl PipeConnection {
-    pub(crate) fn new(h: RawHandle) -> PipeConnection {
-        let mut pipe = unsafe { NamedPipe::from_raw_handle(h as RawHandle) };
-
-        let poll = Poll::new().unwrap();
-
-        poll.registry()
-            .register(&mut pipe, CLIENT, Interest::WRITABLE | Interest::READABLE)
-            .unwrap();
-
+    pub(crate) fn new(h: isize) -> PipeConnection {
         PipeConnection {
-            named_pipe: Mutex::new(pipe),
-            poller: Mutex::new(poll),
-            instance_number: 0, //todo for client scenarios
+            named_pipe: NamedPipe(h),
         }
     }
 }
 
 impl PipeConnection {
     pub(crate) fn id(&self) -> i32 {
-        self.instance_number
+        self.named_pipe.0 as i32
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
-        trace!("reading from  pipe: {}", self.instance_number);
+        let (ol, event) = Overlapped::new_with_event(self.id());
 
-        let mut events = Events::with_capacity(1024);
-        loop {
-            // grabbing the lock on the poller here isn't ideal but the named pipe needs mutable access to read
-            // This is ok though as read is currently blocking other threads in the server impl (only one read at a time)
-            // It is also blocking until read event comes through.  This is preferable as it will not cause any cpu cycles 
-            self.poller.lock().unwrap().poll(&mut events, None).unwrap();
-            match self.named_pipe.lock().unwrap().read(buf) {
-                Ok(0) => {
-                    return Err(crate::Error::LocalClosed);
+
+        let len = std::cmp::min(buf.len(), u32::MAX as usize) as u32;
+        let mut bytes_read= 0;
+        let result = unsafe { ReadFile(self.named_pipe.0, buf.as_mut_ptr() as *mut _, len, &mut bytes_read,ol.as_mut_ptr()) };
+        if result > 0 && bytes_read > 0 {
+            // Got result no need to wait for pending read to complete
+            close_handle(event);
+            return Ok(bytes_read as usize)
+        }
+
+        match io::Error::last_os_error() {
+            ref e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
+                let mut bytes_transfered = 0;
+                let res = unsafe {GetOverlappedResult(self.named_pipe.0, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
+                close_handle(event);
+                match res {
+                    0 => {
+                        return Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap()))
+                    }
+                    _ => {
+                        return Ok(bytes_transfered as usize)
+                    }
                 }
-                Ok(x) => {
-                    return Ok(x);
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(e) if e.raw_os_error().is_some() => {
-                    return Err(crate::Error::Windows(e.raw_os_error().unwrap()))
-                }
-                Err(e) => {
-                    trace!("Error writing to pipe: {}", e);
-                    return Err(crate::Error::Others(e.to_string()));
-                }
+            }
+            ref e => {
+                return Err(Error::Others(format!("failed to read from pipe: {:?}", e)))
             }
         }
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize> {
-        trace!("Writing to  pipe: {}", self.instance_number);
-        loop {
-            // grabbing the lock write to read isn't ideal
-            // the named pipe needs mutable access to read
-            match self.named_pipe.lock().unwrap().write(buf) {
-                Ok(x) => return Ok(x),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
+        let (ol, event) = Overlapped::new_with_event(self.id());
+        let mut bytes_written= 0;
+        let len = std::cmp::min(buf.len(), u32::MAX as usize) as u32;
+        let result = unsafe { WriteFile(self.named_pipe.0, buf.as_ptr() as *const _,len, &mut bytes_written, ol.as_mut_ptr())};
+        if result > 0 && bytes_written > 0 {
+            // No need to wait for pending write to complete
+            close_handle(event);
+            return Ok(bytes_written as usize)
+        }
+
+        match io::Error::last_os_error() {
+            ref e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
+                let mut bytes_transfered = 0;
+                let res = unsafe {GetOverlappedResult(self.named_pipe.0, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
+                close_handle(event);
+                match res {
+                    0 => {
+                        return Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap()))
+                    }
+                    _ => {
+                        return Ok(bytes_transfered as usize)
+                    }
                 }
-                Err(e) if e.raw_os_error() == Some(ERROR_NO_DATA as i32) => {
-                    return Err(Error::Windows(e.raw_os_error().unwrap()))
-                }
-                Err(e) if e.raw_os_error().is_some() => {
-                    return Err(Error::Windows(e.raw_os_error().unwrap()))
-                }
-                Err(e) => {
-                    trace!("Error writing to pipe: {}", e);
-                    return Err(Error::Others(e.to_string()));
-                }
+            }
+            ref e => {
+                return Err(Error::Others(format!("failed to write to pipe: {:?}", e)))
             }
         }
     }
 
     pub fn close(&self) -> Result<()> {
-        let h = self.named_pipe.lock().unwrap().as_raw_handle();
-        let result = unsafe { CloseHandle(h as isize) };
-        match result {
-            0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
-            _ => Ok(())
-        }
+        close_handle(self.named_pipe.0)
     }
 
+    
+
     pub fn shutdown(&self) -> Result<()> {
-        match self.named_pipe.lock().unwrap().disconnect() {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Error::Others(e.to_string()))
+        let result = unsafe { DisconnectNamedPipe(self.named_pipe.0) };
+        match result {
+            0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+            _ => Ok(()),
         }
     }
 }
 
 pub struct ClientConnection {
     address: String
+}
+
+fn close_handle(handle: isize) -> Result<()> {
+    let result = unsafe { CloseHandle(handle) };
+    match result {
+        0 => Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap())),
+        _ => Ok(()),
+    }
 }
 
 impl ClientConnection {
@@ -264,6 +278,7 @@ impl ClientConnection {
     }
 
     pub fn ready(&self) -> std::result::Result<Option<()>, io::Error> {
+        // Windows is completion based system so "readiness" isn't really applicable 
         Ok(Some(()))
     }
 
@@ -274,7 +289,7 @@ impl ClientConnection {
             .custom_flags(FILE_FLAG_OVERLAPPED);
         let file = opts.open(self.address.as_str());
 
-        PipeConnection::new(file.unwrap().into_raw_handle())
+        PipeConnection::new(file.unwrap().into_raw_handle() as isize)
     }
 
     pub fn close_receiver(&self) -> Result<()> {

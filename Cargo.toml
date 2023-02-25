@@ -22,8 +22,7 @@ tokio = { version = "1", features = ["rt", "sync", "io-util", "macros", "time"],
 futures = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies] 
-windows-sys = {version = "0.45", features = [ "Win32_Foundation", "Win32_Networking_WinSock", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_WindowsProgramming", "Win32_System_Pipes", "Win32_Security"]}
-mio = { version = "0.8.5", features = ["os-ext", "os-poll"] }
+windows-sys = {version = "0.45", features = [ "Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_Security", "Win32_System_Threading"]}
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 tokio-vsock = { version = "0.3.1", optional = true }
