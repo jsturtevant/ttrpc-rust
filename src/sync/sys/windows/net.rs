@@ -48,22 +48,12 @@ struct Overlapped {
 }
 
 impl Overlapped {
-    fn new_with_event(i: i32) -> (Overlapped, isize)  {
-       // create and event to wait on 
-        // https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult#remarks
-        // "It is safer to use an event object because of the confusion that can occur when multiple simultaneous overlapped operations are performed on the same file, named pipe, or communications device." 
-        // "In this situation, there is no way to know which operation caused the object's state to be signaled."
-        trace!("Creating event for overlapped IO (id: {}, thread: {:?})", i, std::thread::current().id());
-        let name = OsStr::new(format!("id-{}-{:?}", i,std::thread::current().id()).as_str())
-        .encode_wide()
-        .chain(Some(0)) // add NULL termination
-        .collect::<Vec<_>>();
-        let event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, name.as_ptr()) };
+    fn new_with_event(event: isize) -> Overlapped  {        
         let mut ol = Overlapped {
             inner: UnsafeCell::new(unsafe { std::mem::zeroed() }),
         };
         ol.inner.get_mut().hEvent = event;
-        (ol, event)
+        ol
     }
 
     fn new() -> Overlapped  {
@@ -105,7 +95,7 @@ impl PipeListener {
         }
 
         match io::Error::last_os_error() {
-            ref e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
+            e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
                 let mut bytes_transfered = 0;
                 let res = unsafe {GetOverlappedResult(np.0, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
                 match res {
@@ -113,14 +103,14 @@ impl PipeListener {
                         return Err(io::Error::last_os_error());
                     }
                     _ => {
-                        Ok(Some(PipeConnection{named_pipe: np}))
+                        Ok(Some(PipeConnection::new(np.0)))
                     }
                 }
             }
-            ref e if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {
-                Ok(Some(PipeConnection{named_pipe: np}))
+            e if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {
+                Ok(Some(PipeConnection::new(np.0)))
             }
-            ref e => {
+            e => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     format!("failed to connect pipe: {:?}", e),
@@ -135,7 +125,6 @@ impl PipeListener {
             .chain(Some(0)) // add NULL termination
             .collect::<Vec<_>>();
 
-        // bitwise or file_flag_first_pipe_instance with file_flag_overlapped and pipe_access_duplex
         let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED ;
 
         if self.first_instance.load(Ordering::SeqCst) {
@@ -160,12 +149,30 @@ impl PipeListener {
 
 pub struct PipeConnection {
     named_pipe: NamedPipe,
+    read_event: isize,
+    write_event: isize,
 }
 
 impl PipeConnection {
     pub(crate) fn new(h: isize) -> PipeConnection {
+        // create and event to wait on 
+        // https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult#remarks
+        // "It is safer to use an event object because of the confusion that can occur when multiple simultaneous overlapped operations are performed on the same file, named pipe, or communications device." 
+        // "In this situation, there is no way to know which operation caused the object's state to be signaled."
+        let read_name = OsStr::new(format!("read-{}-{:?}", h as i32,std::thread::current().id()).as_str())
+        .encode_wide()
+        .chain(Some(0)) // add NULL termination
+        .collect::<Vec<_>>();
+        let write_name = OsStr::new(format!("write-{}-{:?}", h as i32,std::thread::current().id()).as_str())
+        .encode_wide()
+        .chain(Some(0)) // add NULL termination
+        .collect::<Vec<_>>();
+        let read_event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, read_name.as_ptr()) };
+        let write_event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, write_name.as_ptr()) };
         PipeConnection {
             named_pipe: NamedPipe(h),
+            read_event: read_event,
+            write_event: write_event,
         }
     }
 }
@@ -176,15 +183,13 @@ impl PipeConnection {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
-        let (ol, event) = Overlapped::new_with_event(self.id());
-
+        let ol = Overlapped::new_with_event(self.read_event);
 
         let len = std::cmp::min(buf.len(), u32::MAX as usize) as u32;
         let mut bytes_read= 0;
         let result = unsafe { ReadFile(self.named_pipe.0, buf.as_mut_ptr() as *mut _, len, &mut bytes_read,ol.as_mut_ptr()) };
         if result > 0 && bytes_read > 0 {
             // Got result no need to wait for pending read to complete
-            close_handle(event);
             return Ok(bytes_read as usize)
         }
 
@@ -192,7 +197,6 @@ impl PipeConnection {
             ref e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
                 let mut bytes_transfered = 0;
                 let res = unsafe {GetOverlappedResult(self.named_pipe.0, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
-                close_handle(event);
                 match res {
                     0 => {
                         return Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap()))
@@ -209,13 +213,12 @@ impl PipeConnection {
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize> {
-        let (ol, event) = Overlapped::new_with_event(self.id());
+        let ol = Overlapped::new_with_event(self.write_event);
         let mut bytes_written= 0;
         let len = std::cmp::min(buf.len(), u32::MAX as usize) as u32;
         let result = unsafe { WriteFile(self.named_pipe.0, buf.as_ptr() as *const _,len, &mut bytes_written, ol.as_mut_ptr())};
         if result > 0 && bytes_written > 0 {
             // No need to wait for pending write to complete
-            close_handle(event);
             return Ok(bytes_written as usize)
         }
 
@@ -223,7 +226,6 @@ impl PipeConnection {
             ref e if e.raw_os_error() == Some(ERROR_IO_PENDING as i32) => {
                 let mut bytes_transfered = 0;
                 let res = unsafe {GetOverlappedResult(self.named_pipe.0, ol.as_mut_ptr(), &mut bytes_transfered, WAIT_FOR_EVENT) };
-                close_handle(event);
                 match res {
                     0 => {
                         return Err(Error::Windows(io::Error::last_os_error().raw_os_error().unwrap()))
@@ -240,10 +242,10 @@ impl PipeConnection {
     }
 
     pub fn close(&self) -> Result<()> {
-        close_handle(self.named_pipe.0)
+        close_handle(self.named_pipe.0)?;
+        close_handle(self.read_event)?;
+        close_handle(self.write_event)
     }
-
-    
 
     pub fn shutdown(&self) -> Result<()> {
         let result = unsafe { DisconnectNamedPipe(self.named_pipe.0) };
@@ -271,14 +273,14 @@ impl ClientConnection {
         Ok(ClientConnection::new(sockaddr))
     }
 
-    pub(crate) fn new(sockaddr: &str) -> ClientConnection {
+    pub(crate) fn new(sockaddr: &str) -> ClientConnection {       
         ClientConnection {
             address: sockaddr.to_string()
         }
     }
 
     pub fn ready(&self) -> std::result::Result<Option<()>, io::Error> {
-        // Windows is completion based system so "readiness" isn't really applicable 
+        // Windows is a "completion" based system so "readiness" isn't really applicable 
         Ok(Some(()))
     }
 
@@ -293,12 +295,11 @@ impl ClientConnection {
     }
 
     pub fn close_receiver(&self) -> Result<()> {
-        // only close from the connection object in windows
+        // just have the named pipe to close on windows.
         Ok(())
     }
 
     pub fn close(&self) -> Result<()> {
-        // only close from the connection object in windows
         Ok(())
     }
 }

@@ -28,6 +28,9 @@ use crate::sync::sys::{ClientConnection};
 use crate::proto::{Code, Codec, MessageHeader, Request, Response, MESSAGE_TYPE_RESPONSE};
 use crate::sync::channel::{read_message, write_message};
 
+#[cfg(windows)]
+use super::sys::PipeConnection;
+
 type Sender = mpsc::Sender<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 type Receiver = mpsc::Receiver<(Vec<u8>, mpsc::SyncSender<Result<Vec<u8>>>)>;
 
@@ -211,5 +214,14 @@ impl Drop for ClientConnection {
     fn drop(&mut self) {
         self.close().unwrap();
         trace!("Client is dropped");
+    }
+}
+
+// close everything up from the pipe connection on Windows
+#[cfg(windows)]
+impl Drop for PipeConnection {
+    fn drop(&mut self) {
+        self.close().unwrap();
+        trace!("pipe connection is dropped");
     }
 }
