@@ -169,7 +169,6 @@ pub struct PipeConnection {
 // "In this situation, there is no way to know which operation caused the object's state to be signaled."
 impl PipeConnection {
     pub(crate) fn new(h: isize) -> PipeConnection {
-
         trace!("creating events for thread {:?} on pipe instance {}", std::thread::current().id(), h as i32);
         let read_event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, std::ptr::null_mut()) };
         let write_event = unsafe { CreateEventW(std::ptr::null_mut(), 0, 1, std::ptr::null_mut()) };
@@ -185,6 +184,7 @@ impl PipeConnection {
     }
 
     pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
+        trace!("starting read for thread {:?} on pipe instance {}", std::thread::current().id(), self.named_pipe as i32);
         let ol = Overlapped::new_with_event(self.read_event);
 
         let len = std::cmp::min(buf.len(), u32::MAX as usize) as u32;
@@ -216,6 +216,7 @@ impl PipeConnection {
     }
 
     pub fn write(&self, buf: &[u8]) -> Result<usize> {
+        trace!("starting write for thread {:?} on pipe instance {}", std::thread::current().id(), self.named_pipe as i32);
         let ol = Overlapped::new_with_event(self.write_event);
         let mut bytes_written= 0;
         let len = std::cmp::min(buf.len(), u32::MAX as usize) as u32;

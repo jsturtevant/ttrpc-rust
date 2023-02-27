@@ -1,24 +1,46 @@
-use std::{process::Command, time::Duration};
+use std::{process::{Command}, time::Duration, io::{BufReader, BufRead}};
 
 #[test]
 fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
     // start the server and give it a moment to start.
-    let server = run_example("server").spawn();
+    let mut server = run_example("server").spawn().unwrap();
     std::thread::sleep(Duration::from_secs(2));
 
-    let client = run_example("client").spawn();
+    let mut client = run_example("client").spawn().unwrap();
     let mut client_succeeded = false;
-    match client.unwrap().wait() {
-        Ok(status) => {
-            client_succeeded = status.success();
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(600);
+    loop {
+        if start.elapsed() > timeout {
+            println!("Running the client timed out. output:");
+            client.kill().unwrap_or_else(|e| {
+                println!("This may occur on Windows if the process has exited: {}", e);
+            });
+            let output = client.stdout.unwrap();
+            BufReader::new(output).lines().for_each(|line| {
+                println!("{}", line.unwrap());
+            });
+            break;
         }
-        Err(e) => {
-            println!("Error: {e}");
+
+        match client.try_wait() {
+            Ok(Some(status)) => {
+                client_succeeded = status.success();
+                break;
+            }
+            Ok(None) => {
+                // still running
+                continue;
+            }
+            Err(e) => {
+                println!("Error: {e}");
+                break;
+            }
         }
     }
-
+   
     // be sure to clean up the server, the client should have run to completion
-    server.unwrap().kill()?;
+    server.kill()?;
     assert!(client_succeeded);
     Ok(())
 }
