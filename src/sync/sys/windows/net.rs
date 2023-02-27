@@ -29,7 +29,7 @@ use std::{io};
 use windows_sys::Win32::Foundation::{ CloseHandle, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE };
 use windows_sys::Win32::Storage::FileSystem::{ ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX };
 use windows_sys::Win32::System::IO::{ GetOverlappedResult, OVERLAPPED };
-use windows_sys::Win32::System::Pipes::{ CreateNamedPipeW, ConnectNamedPipe,DisconnectNamedPipe, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES };
+use windows_sys::Win32::System::Pipes::{ CreateNamedPipeW, ConnectNamedPipe,DisconnectNamedPipe, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, PIPE_REJECT_REMOTE_CLIENTS };
 use windows_sys::Win32::System::Threading::CreateEventW;
 
 const PIPE_BUFFER_SIZE:u32 = 65536;
@@ -132,7 +132,7 @@ impl PipeListener {
             self.first_instance.swap(false, Ordering::SeqCst);
         }
 
-        match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, PIPE_BUFFER_SIZE, PIPE_BUFFER_SIZE, 0, std::ptr::null_mut())} {
+        match  unsafe { CreateNamedPipeW(name.as_ptr(), open_mode, PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, PIPE_BUFFER_SIZE, PIPE_BUFFER_SIZE, 0, std::ptr::null_mut())} {
             INVALID_HANDLE_VALUE => {
                 return Err(io::Error::last_os_error())
             }
@@ -295,11 +295,12 @@ impl ClientConnection {
     }
 
     pub fn close_receiver(&self) -> Result<()> {
-        // just have the named pipe to close on windows.
+        // close the pipe from the pipe connection
         Ok(())
     }
 
     pub fn close(&self) -> Result<()> {
+        // close the pipe from the pipe connection
         Ok(())
     }
 }
