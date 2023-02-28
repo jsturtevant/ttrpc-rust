@@ -1,4 +1,8 @@
-use std::{process::{Command}, time::Duration, io::{BufReader, BufRead}};
+use std::{
+    io::{BufRead, BufReader},
+    process::Command,
+    time::Duration,
+};
 
 #[test]
 fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,7 +42,7 @@ fn run_sync_example() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-   
+
     // be sure to clean up the server, the client should have run to completion
     server.kill()?;
     assert!(client_succeeded);
